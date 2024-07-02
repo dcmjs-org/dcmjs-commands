@@ -4,6 +4,8 @@ import { dicomweb, instanceDicom, dumpDicom } from '../src/index.js';
 
 const program = new Command();
 
+program.option('-s, --study <studyInstanceUID>', 'Download a specific study instance UID');
+
 program
   .name('dicomwebjs')
   .description('dicomwebjs based tools for manipulation of DICOMweb')
@@ -17,6 +19,21 @@ program.command('dump')
     const qido = await dicomweb.readDicomWeb(fileName, options);
     for (const dict of qido) {
       dumpDicom({ dict });
+    }
+  });
+
+program.command('download')
+  .description('Download dicomweb file(s)')
+  .argument('<dicomwebUrl>', 'dicomweb URL to the base DICOMweb service')
+  .option('-d, --directory <dicomwebdir>', 'Download to local DICOMweb directory')
+  .action(async (fileName, options) => {
+    let downloadUrls = [fileName];
+    if (options.study) {
+      downloadUrls = await dicomweb.queryDownloads(fileName, options);
+    }
+    for (const downloadUrl of downloadUrls) {
+      const data = await dicomweb.readDicomWeb(downloadUrl, options);
+      dicomweb.store(downloadUrl, data, options);
     }
   });
 

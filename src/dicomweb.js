@@ -22,3 +22,12 @@ export function readDicomWebFile(fileName, _options) {
   const str = uncompressed.toString();
   return JSON.parse(str);
 }
+
+export function queryDownloads(wadoUrl, options) {
+  console.log("Querying for study", options.study);
+  return [`${wadoUrl}?StudyInstanceUID=${options.study}`];
+}
+
+export function store(path, data, options) {
+  console.log("Storign data", path, data);
+}
