@@ -21,12 +21,12 @@ dcmjs dump <part10file>
 
 ```
 # Example series retrieve/dump
-dicomwebjs dump dicomwebjs dump https://d33do7qe4w26qo.cloudfront.net/dicomweb/studies/1.3.6.1.4.1.14519.5.2.1.4792.2001.105216574054253895819671475627/series
+dicomwebjs dump https://d33do7qe4w26qo.cloudfront.net/dicomweb/studies/1.3.6.1.4.1.14519.5.2.1.4792.2001.105216574054253895819671475627/series
 # Example metadata retrieve/dump
 dicomwebjs dump https://d33do7qe4w26qo.cloudfront.net/dicomweb/studies/1.3.6.1.4.1.14519.5.2.1.4792.2001.105216574054253895819671475627/series/1.3.6.1.4.1.14519.5.2.1.4792.2001.323835191362867057104216682000/metadata
 
 # Example file retrieve
-dicomwebjs dump testdata/studies/1.2.276.1.74.1.2.132733202464108492637644434464108492\series\2.16.840.1.113883.3.8467.132733202477512857637644434477512857\metadata.gz
+dicomwebjs dump testdata/studies/1.2.276.1.74.1.2.132733202464108492637644434464108492/series/2.16.840.1.113883.3.8467.132733202477512857637644434477512857/metadata.gz
 ```
 
 ## File Locations
