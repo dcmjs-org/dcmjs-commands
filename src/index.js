@@ -1,6 +1,8 @@
 import fs from "fs";
 import dcmjs from "dcmjs";
 
+export * as dicomweb from './dicomweb.js';
+
 const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
 
 export function readDicom(fileName) {
@@ -42,8 +44,17 @@ export function dumpData(data, options, indent = '') {
 }
 
 export function valueToString(value, options) {
-  const { Value: values } = value;
+  const { Value: values, vr, InlineBinary, BulkDataURI } = value;
+  if (InlineBinary) {
+    return `Inline Binary ${InlineBinary.substring(0, Math.min(InlineBinary.length, 32))}${InlineBinary.length > 31 ? '...' : ''} (${InlineBinary.length * 3 / 4})`
+  }
+  if (BulkDataURI) {
+    return `URL ${BulkDataURI}`;
+  }
   if (!values) {
+    if (vr) {
+      return vr;
+    }
     console.log("***** Value = ", value);
     return '';
   }
@@ -55,13 +66,16 @@ export function valueToString(value, options) {
   if (typeof v0 === 'object') {
     return values.map(it => JSON.stringify(it)).join(', ');
   }
+  if (!Array.isArray(values)) {
+    return JSON.stringify(values);
+  }
   return values.map(it => String(it)).join(', ');
 }
 
 export function dumpSq(tag, value, options, indent) {
   const { Value: sq } = value;
   if (sq?.length === undefined) {
-    console.log("**** undefined value length", value);
+    console.log("Empty SQ");
     return;
   }
   for (let i = 0; i < sq.length; i++) {
