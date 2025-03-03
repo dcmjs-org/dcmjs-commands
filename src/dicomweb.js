@@ -3,8 +3,11 @@ import fs from "fs";
 import dcmjs from "dcmjs";
 
 import { httprequest } from "./webRetrieve.js";
+import { logger } from "./utils/index.js";
 
 const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
+
+const log = logger.commandsLog;
 
 /**
  * The dicomweb support classes for querying and reading various DICOMweb data sources
@@ -48,7 +51,7 @@ export async function queryDownloads(wadoUrl, options) {
   const study = await readDicomWeb(studyQuery)?.[0];
   const downloaded = [];
   if (!study) {
-    console.log("No study found for", options.study);
+    log.warn("No study found for", options.study);
     return downloaded;
   }
   downloaded.push({
@@ -57,10 +60,11 @@ export async function queryDownloads(wadoUrl, options) {
   });
 
   const series = await readDicomWeb(getSeriesQuery(wadoUrl, options, query));
-  console.log("Found series", series);
+  log.debug("Found series", series);
   return [];
 }
 
 export function store(path, data, options) {
-  console.log("Storing data", path, data);
+  log.info("Storing data", path);
+  log.debug(JSON.stringify(data, null, 2));
 }
