@@ -1,9 +1,14 @@
-import fs from "fs";
-import zlib from "zlib";
+import { writeFile } from "fs/promises";
+import { promisify } from "util";
+import { gzip } from "zlib";
 
-export function saveJson(filePath, data, zip = false) {
+const gzipAsync = promisify(gzip);
+
+export async function saveJson(filePath, data) {
+  const json = JSON.stringify(data, null, 2);
+  const zipped = await gzipAsync(json);
+  await writeFile(`${filePath}.gz`, zipped);
+
   // Uncomment the next line to save the raw json
-  // fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-  const zipped = zlib.gzipSync(JSON.stringify(data));
-  fs.writeFileSync(`${filePath}.gz`, zipped);
+  // await writeFile(filePath, json);
 }
