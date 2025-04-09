@@ -6,9 +6,9 @@ import loglevel from "loglevel";
  * for forwards compatibility.
  */
 export function getRootLogger(name) {
-  const logger = loglevel.getLogger(name[0]);
+  const logger = loglevel.getLogger(name);
   logger.getLogger = (...names) => {
-    return getRootLogger(`${name}.${names.join(".")}`);
+    return getRootLogger(`${logger.name}.${names.join(".")}`);
   };
   return logger;
 }

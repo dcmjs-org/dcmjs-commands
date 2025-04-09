@@ -1,9 +1,15 @@
 import fs from "fs/promises";
 import crypto from "crypto";
-import { saveJson } from "../utils/index.js";
-import { DicomStoreAccess } from "./DicomStoreAccess.js";
+import { saveJson } from "../utils/index";
+import { StudyAccess } from "../access/DicomAccess";
 
-export class DicomStoreSDW extends DicomStoreAccess {
+export class StaticDicomWebStudyAccess extends StudyAccess {
+  constructor(dicomAccess, studyUID) {
+    console.log("Hello studyUID", studyUID);
+    this.dicomAccess = dicomAccess;
+    this.studyUID = studyUID;
+  }
+
   // Store all study-related content to the local SDW structure
   async store(path, studyAccess, seriesAccess) {
     console.log("💾 Saving study metadata...");
@@ -56,7 +62,7 @@ export class DicomStoreSDW extends DicomStoreAccess {
         seriesAccess.seriesInstanceUIDsMetadata.get(SeriesInstanceUID);
 
       const metadataMap = Object.fromEntries(
-        seriesMetadata.map((item) => [item["00080018"]?.Value?.[0], item]),
+        seriesMetadata.map((item) => [item["00080018"]?.Value?.[0], item])
       );
 
       const instancesDir = `${path}/series/${SeriesInstanceUID}/instances`;
@@ -109,7 +115,7 @@ export class DicomStoreSDW extends DicomStoreAccess {
         const framePath = `${framesDir}/${frame.frameNumber}`;
         await fs.writeFile(framePath, frame.data?.buffer || frame.data);
         console.log(
-          `🖼️  Frame ${frame.frameNumber} of instance ${frame.sopInstanceUID} saved.`,
+          `🖼️  Frame ${frame.frameNumber} of instance ${frame.sopInstanceUID} saved.`
         );
       }
     }
@@ -136,7 +142,7 @@ export class DicomStoreSDW extends DicomStoreAccess {
 
         await saveJson(fullPath, { data: base64 });
         console.log(
-          `🧱 Bulk data (${item.tag}) from instance ${item.sopInstanceUID} saved.`,
+          `🧱 Bulk data (${item.tag}) from instance ${item.sopInstanceUID} saved.`
         );
       }
     }

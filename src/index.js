@@ -3,6 +3,7 @@ import dcmjs from "dcmjs";
 
 export * as utils from "./utils/index.js";
 export * as dicomweb from "./dicomweb.js";
+export * from "./access/DicomAccess";
 
 const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
 

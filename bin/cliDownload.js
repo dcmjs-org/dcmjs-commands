@@ -1,26 +1,20 @@
-import fs from "fs";
-import path from "path";
-import { DicomAccess } from "../src/access/DicomAccess.js";
-import { DicomStoreSDW } from "../src/store/DicomStoreSDW.js";
+import { DicomAccess } from "@dcmjs/commands";
 
 const action = async (url, options) => {
-  // Create download directory using StudyInstanceUID
-  const baseDir = path.join(options.directory, options.StudyInstanceUID);
-  let downloadDir = baseDir;
-  let counter = 1;
-
-  // Ensure directory does not already exist; add suffix if needed
-  while (fs.existsSync(downloadDir)) {
-    downloadDir = `${baseDir}_${counter++}`;
-  }
-
-  fs.mkdirSync(downloadDir, { recursive: true });
-  console.log(`📁 Study will be downloaded to: ${downloadDir}`);
-
   try {
+    const destination = await DicomAccess.createInstance(options.directory, {
+      ...options,
+      scheme: "sdw",
+    });
+
     // Create access instance (currently supports only DICOMweb)
     console.log("🔌 Creating DICOM access instance...");
     const access = await DicomAccess.createInstance(url, options);
+
+    const destStudy = await destination.queryStudy(options.StudyInstanceUID);
+    const srcStudy = await access.queryStudy(options.StudyInstanceUID);
+
+    destStudy.store(srcStudy, options);
 
     // Fetch study metadata
     console.log("📚 Querying study metadata...");
@@ -68,7 +62,10 @@ export default async function cliDownload(program) {
     .command("download")
     .description("Download a full DICOM study from any supported source")
     .argument("<url>", "DICOMweb URL or local path (e.g. ./study, scp://...)")
-    .option("-S, --StudyInstanceUID <StudyInstanceUID>", "StudyInstanceUID to download")
+    .option(
+      "-S, --StudyInstanceUID <StudyInstanceUID>",
+      "StudyInstanceUID to download"
+    )
     .option("-d, --directory <targetDir>", "Download to local directory", "./")
     .option("--debug", "Enable debug logging")
     .action(action);
