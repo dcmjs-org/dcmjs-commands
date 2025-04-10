@@ -1,5 +1,5 @@
 // Abstract base class for DICOM access implementations
-export class DicomAccess {
+export abstract class DicomAccess {
   public readonly url: string;
   public readonly options;
 
@@ -31,32 +31,51 @@ export class DicomAccess {
   }
 
   // Subclasses must implement study query
-  async queryStudy() {
-    throw new Error("queryStudy() must be implemented by subclass");
+  abstract queryStudy(studyUID: string): Promise<StudyAccess>;
+}
+
+export abstract class StudyAccess {
+  public store?: (study, options) => Promise<StudyAccess>;
+
+  public abstract querySeries(constraints?): Promise<Array<SeriesAccess>>;
+
+  protected series = new Map<string, SeriesAccess>();
+
+  public add(series) {
+    if (this.series.has(series.seriesInstanceUID)) {
+      return this.series.get(series.seriesInstanceUID);
+    }
+    const newSeries = this.createAccess(series);
+    this.series.set(series.seriesInstanceUID, newSeries);
+    return newSeries;
   }
 
-  // Subclasses must implement series query
-  async querySeries() {
-    throw new Error("querySeries() must be implemented by subclass");
+  public abstract createAccess(series);
+}
+
+/**
+ * A series access allow getting to the series objects within a study.
+ */
+export abstract class SeriesAccess {
+  public readonly seriesInstanceUID: string;
+
+  protected instances = new Map<string, InstanceAccess>();
+
+  constructor(seriesInstanceUID: string) {
+    this.seriesInstanceUID = seriesInstanceUID;
+  }
+
+  public add(instance: InstanceAccess) {
+    if (this.instances.has(instance.sopInstanceUID)) {
+      return this.instances.get(instance.sopInstanceUID);
+    }
+    const newInstance = this.createAccess(instance);
+    this.instances.set(instance.sopInstanceUID, newInstance);
+    return newInstance;
   }
 }
 
-export class StudyAccess {
-  store;
-
-  async storeSeries(path, seriesAccess) {
-    throw new Error("storeSeries() must be implemented by subclass");
-  }
-
-  async storeInstances(path, seriesAccess) {
-    throw new Error("storeInstances() must be implemented by subclass");
-  }
-
-  async storeFrames(path, seriesAccess) {
-    throw new Error("storeFrames() must be implemented by subclass");
-  }
-
-  async storeBulkData(path, seriesAccess) {
-    throw new Error("storeBulkData() must be implemented by subclass");
-  }
+export class InstanceAccess {
+  public readonly sopInstanceUID: string;
+  public readonly sopClassUID: string;
 }

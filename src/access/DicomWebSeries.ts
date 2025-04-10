@@ -9,7 +9,7 @@ const nonFrameSOPs = {
   "1.2.840.10008.5.1.4.1.1.104.1": "Encapsulated PDF",
 };
 
-export class DicomWebSeriesAccess {
+export class DicomWebSeries {
   constructor(url, options, metadata) {
     this.url = url;
     this.options = options;
@@ -64,7 +64,7 @@ export class DicomWebSeriesAccess {
         seriesMetadata.map((item) => [
           item["00080018"]?.Value?.[0], // SOPInstanceUID
           item["00080016"]?.Value?.[0], // SOPClassUID
-        ]),
+        ])
       );
 
       const frames = [];
@@ -78,7 +78,7 @@ export class DicomWebSeriesAccess {
           continue;
 
         console.log(
-          `   ↪️ Fetching ${numberOfFrames} frame(s) for instance ${sopInstanceUID}`,
+          `   ↪️ Fetching ${numberOfFrames} frame(s) for instance ${sopInstanceUID}`
         );
         for (
           let frameNumber = 1;
@@ -118,14 +118,14 @@ export class DicomWebSeriesAccess {
             fixBulkDataURI(
               tagValue,
               { StudyInstanceUID: this.StudyInstanceUID, SeriesInstanceUID },
-              dicomWebConfig,
+              dicomWebConfig
             );
             const wadoURL = tagValue.BulkDataURI;
             console.log(`   ↪️ Fetching bulk data from ${wadoURL}`);
             const data = await dicomweb.readDicomWeb(wadoURL);
             if (data?.error || data?.statusCode === 403) {
               console.warn(
-                `     ⚠️ Skipped bulk data tag ${tag} (error or 403)`,
+                `     ⚠️ Skipped bulk data tag ${tag} (error or 403)`
               );
               continue;
             }

@@ -1,4 +1,6 @@
-export class DicomWebStudyAccess {
+import { StudyAccess } from "./DicomAccess";
+
+export class DicomWebStudy extends StudyAccess {
   constructor(url, options, metadata) {
     this.url = url;
     this.options = options;

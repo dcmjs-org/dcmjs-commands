@@ -16,37 +16,6 @@ const action = async (url, options) => {
 
     destStudy.store(srcStudy, options);
 
-    // Fetch study metadata
-    console.log("📚 Querying study metadata...");
-    const studyAccess = await access.queryStudy();
-
-    // Fetch series metadata
-    console.log("📚 Querying series metadata...");
-    const seriesAccess = await access.querySeries();
-
-    // Download series-level metadata
-    console.log("📄 Downloading metadata for each series...");
-    await seriesAccess.querySeriesInstanceUIDsMetadata();
-    console.log("✅ Metadata downloaded.");
-
-    // Download instances (SOPs)
-    console.log("📦 Downloading DICOM instances...");
-    await seriesAccess.querySeriesInstanceUIDsInstances();
-    console.log("✅ Instances downloaded.");
-
-    // Download frames for multi-frame instances
-    console.log("🖼️  Downloading image frames...");
-    await seriesAccess.querySeriesInstanceUIDsFrames();
-    console.log("✅ Frames downloaded.");
-
-    // Download external bulk data (non-pixel data)
-    console.log("🧱 Downloading bulk data...");
-    await seriesAccess.querySeriesInstanceUIDsBulkData();
-    console.log("✅ Bulk data downloaded.");
-
-    // Save everything to disk in SDW structure
-    console.log("💾 Saving study to disk...");
-    await new DicomStoreSDW().store(downloadDir, studyAccess, seriesAccess);
     console.log(`🎉 Download complete. Study saved to: ${downloadDir}`);
   } catch (err) {
     console.error("❌ An error occurred during download:", err);
