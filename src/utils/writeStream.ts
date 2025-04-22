@@ -19,7 +19,6 @@ export const writeStream = (dir, nameSrc, options?) => {
     dir,
     `tempFile-${Math.round(Math.random() * 1000000000)}`
   );
-  console.warn("Writing to stream", tempName);
   const finalName = path.join(dir, name);
   const rawStream = fs.createWriteStream(tempName);
   const closePromise = new Promise((resolve) => {
