@@ -4,19 +4,26 @@ const action = async (url, options) => {
   try {
     const destination = await DicomAccess.createInstance(options.directory, {
       ...options,
-      scheme: "sdw",
+      scheme: "file",
     });
 
     // Create access instance (currently supports only DICOMweb)
-    console.log("🔌 Creating DICOM access instance...");
+    console.log(
+      "🔌 Creating DICOM access instance...",
+      url,
+      "to",
+      options.directory
+    );
     const access = await DicomAccess.createInstance(url, options);
 
-    const destStudy = await destination.queryStudy(options.StudyInstanceUID);
-    const srcStudy = await access.queryStudy(options.StudyInstanceUID);
+    const { StudyInstanceUID: studyUID } = options;
+    const srcStudy = await access.queryStudy(studyUID);
 
-    destStudy.store(srcStudy, options);
+    destination.store(srcStudy, options);
 
-    console.log(`🎉 Download complete. Study saved to: ${downloadDir}`);
+    console.log(
+      `🎉 Download complete. Study saved to: ${options.directory}/studies/${studyUID}`
+    );
   } catch (err) {
     console.error("❌ An error occurred during download:", err);
     process.exit(1);
@@ -35,7 +42,11 @@ export default async function cliDownload(program) {
       "-S, --StudyInstanceUID <StudyInstanceUID>",
       "StudyInstanceUID to download"
     )
-    .option("-d, --directory <targetDir>", "Download to local directory", "./")
+    .option(
+      "-d, --directory <targetDir>",
+      "Download to local directory",
+      "./studies"
+    )
     .option("--debug", "Enable debug logging")
     .action(action);
 }

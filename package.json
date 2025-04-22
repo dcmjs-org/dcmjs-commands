@@ -46,15 +46,6 @@
     "dicomwebjs": "bin/dicomwebjs.js",
     "dimsejs": "bin/dimsejs.js"
   },
-  "scripts": {
-    "test": "jest --config ./jest.config.js",
-    "build": "bun build src/index.js --format esm --target node --outdir dist --",
-    "clean": "rimraf dist",
-    "dicomwebjs": "bun run build && bun run bin/dicomwebjs.js --",
-    "link:exec": "npm install -g && npm link",
-    "lint": "npx eslint --color \"**/*.{js,mjs,cjs}\"",
-    "lint:fix": "npx eslint --fix --color \"**/*.{js,mjs,cjs}\""
-  },
   "jest": {
     "verbose": true
   },
@@ -86,5 +77,14 @@
       "prettier --write",
       "git add"
     ]
+  },
+  "scripts": {
+    "test": "jest --config ./jest.config.js",
+    "build": "bun build src/index.js --format esm --target node --outdir dist --",
+    "clean": "rimraf dist",
+    "dicomwebjs": "bun run build && bun run bin/dicomwebjs.js --",
+    "link:exec": "npm install -g && npm link",
+    "lint": "npx eslint --color \"**/*.{js,mjs,cjs}\"",
+    "lint:fix": "npx eslint --fix --color \"**/*.{js,mjs,cjs}\""
   }
 }

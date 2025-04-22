@@ -1,31 +1,21 @@
 import fs from "fs/promises";
 import crypto from "crypto";
-import { saveJson } from "../utils/index";
+import { saveJson, loadJson, naturalize, logger } from "../utils";
 import { StudyAccess } from "../access/DicomAccess";
 
-export class StaticDicomWebStudyAccess extends StudyAccess {
+const log = logger.commandsLog.getLogger("StaticDicomWebStudy");
+
+export class StaticDicomWebStudy extends StudyAccess {
   constructor(dicomAccess, studyUID) {
-    console.log("Hello studyUID", studyUID);
-    this.dicomAccess = dicomAccess;
-    this.studyUID = studyUID;
+    super(dicomAccess, studyUID);
   }
 
-  // Store all study-related content to the local SDW structure
-  async store(path, studyAccess, seriesAccess) {
-    console.log("💾 Saving study metadata...");
-    await this.#storeStudy(path, studyAccess);
-
-    console.log("💾 Saving series metadata...");
-    await this.#storeSeries(path, seriesAccess);
-
-    console.log("💾 Saving instances...");
-    await this.#storeInstances(path, seriesAccess);
-
-    console.log("💾 Saving frames...");
-    await this.#storeFrames(path, seriesAccess);
-
-    console.log("💾 Saving bulk data...");
-    await this.#storeBulkData(path, seriesAccess);
+  /** Reads the study level index definition */
+  public async read() {
+    const json = await loadJson(this.url, "index.json.gz");
+    this.studyJson = json;
+    this.studyNormal = naturalize(json);
+    log.warn("Ready study normal data", this.studyNormal);
   }
 
   // Save study-level metadata
