@@ -1,114 +1,46 @@
 import fs from "fs/promises";
 import crypto from "crypto";
 import { saveJson, loadJson, naturalize, logger } from "../utils";
-import { StudyAccess } from "../access/DicomAccess";
+import { StudyAccess, SeriesAccess } from "../access/DicomAccess";
+import { StaticDicomWebSeries } from "./StaticDicomWebSeries";
 
 const log = logger.commandsLog.getLogger("StaticDicomWebStudy");
 
 export class StaticDicomWebStudy extends StudyAccess {
-  constructor(dicomAccess, studyUID) {
-    super(dicomAccess, studyUID);
-  }
-
   /** Reads the study level index definition */
   public async read() {
     const json = await loadJson(this.url, "index.json.gz");
     this.studyJson = json;
     this.studyNormal = naturalize(json);
-    log.warn("Ready study normal data", this.studyNormal);
+    log.warn("Read study normal data", !!this.studyNormal);
   }
 
   // Save study-level metadata
-  async #storeStudy(path, studyAccess) {
-    await fs.mkdir(path, { recursive: true });
-    await saveJson(`${path}/index.json`, studyAccess.getMetadata());
-    console.log("✅ Study metadata saved.");
+  async storeStudyData(source: StudyAccess) {
+    await saveJson(this.url, "index.json.gz", source.jsonData);
+    await saveJson(this.url, "study.json.gz", source.natural);
+    console.warn(
+      "Study metadata saved to",
+      this.url,
+      "index and study json.gz"
+    );
   }
 
-  // Save series-level metadata and organize by SeriesInstanceUID
-  async #storeSeries(path, seriesAccess) {
-    const seriesPath = `${path}/series`;
-    await fs.mkdir(seriesPath, { recursive: true });
-    await saveJson(`${seriesPath}/index.json`, seriesAccess.getMetadata());
-
-    for (const series of seriesAccess.getMetadata()) {
-      const SeriesInstanceUID = series["0020000E"]?.Value?.[0];
-      if (!SeriesInstanceUID) continue;
-
-      const seriesDir = `${seriesPath}/${SeriesInstanceUID}`;
-      await fs.mkdir(seriesDir, { recursive: true });
-      await saveJson(`${seriesDir}/metadata`, series);
-      console.log(`📁 Series ${SeriesInstanceUID} metadata saved.`);
-    }
+  public createAccess(sopUID: string, natural) {
+    return new StaticDicomWebSeries(this, sopUID, natural);
   }
 
-  // Save all DICOM instances organized by series and instance UID
-  async #storeInstances(path, seriesAccess) {
-    for (const [
-      SeriesInstanceUID,
-      instances,
-    ] of seriesAccess.seriesInstanceUIDsInstances) {
-      const seriesMetadata =
-        seriesAccess.seriesInstanceUIDsMetadata.get(SeriesInstanceUID);
-
-      const metadataMap = Object.fromEntries(
-        seriesMetadata.map((item) => [item["00080018"]?.Value?.[0], item])
-      );
-
-      const instancesDir = `${path}/series/${SeriesInstanceUID}/instances`;
-      await fs.mkdir(instancesDir, { recursive: true });
-
-      const instanceUIDs = [];
-
-      for (const instance of instances) {
-        const sopInstanceUID = instance["00080018"]?.Value?.[0];
-        if (!sopInstanceUID) continue;
-
-        instanceUIDs.push(sopInstanceUID);
-        const instanceDir = `${instancesDir}/${sopInstanceUID}`;
-        await fs.mkdir(instanceDir, { recursive: true });
-
-        const instanceMetadata = metadataMap[sopInstanceUID];
-        if (instanceMetadata) {
-          await saveJson(`${instanceDir}/index.json`, instanceMetadata);
-          console.log(`📄 Instance ${sopInstanceUID} metadata saved.`);
-
-          // Save additional metadata if instance contains frames
-          const hasFrames = seriesAccess.seriesInstanceUIDsFrames
-            .get(SeriesInstanceUID)
-            ?.some((frame) => frame.sopInstanceUID === sopInstanceUID);
-          if (hasFrames) {
-            const metadataDir = `${instanceDir}/metadata`;
-            await fs.mkdir(metadataDir, { recursive: true });
-            await saveJson(`${metadataDir}/index.json`, instanceMetadata);
-            console.log(`🖼️  Frame metadata for ${sopInstanceUID} saved.`);
-          }
-        }
-      }
-
-      await saveJson(`${instancesDir}/index.json`, instanceUIDs);
-    }
+  public store(source) {
+    console.warn("Storing uid=", source.uid, "to", this.url);
   }
 
-  // Save pixel data frames to disk
-  async #storeFrames(path, seriesAccess) {
-    for (const [
-      SeriesInstanceUID,
-      frames,
-    ] of seriesAccess.seriesInstanceUIDsFrames) {
-      const seriesDir = `${path}/series/${SeriesInstanceUID}`;
-      for (const frame of frames) {
-        const instanceDir = `${seriesDir}/instances/${frame.sopInstanceUID}`;
-        const framesDir = `${instanceDir}/frames`;
-        await fs.mkdir(framesDir, { recursive: true });
-
-        const framePath = `${framesDir}/${frame.frameNumber}`;
-        await fs.writeFile(framePath, frame.data?.buffer || frame.data);
-        console.log(
-          `🖼️  Frame ${frame.frameNumber} of instance ${frame.sopInstanceUID} saved.`
-        );
-      }
+  public async queryChildren(): Promise<SeriesAccess[]> {
+    if (this.childrenMap.size) {
+      return [...this.childrenMap.values()];
     }
+    const json = await loadJson(this.url, "series/index.json.gz");
+    const naturalJson = naturalize(json);
+    return naturalJson.map((series) => this.addJson(series));
   }
 
   // Save non-pixel bulk data blobs into hashed folders

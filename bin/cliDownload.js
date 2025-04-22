@@ -19,7 +19,7 @@ const action = async (url, options) => {
     const { StudyInstanceUID: studyUID } = options;
     const srcStudy = await access.queryStudy(studyUID);
 
-    destination.store(srcStudy, options);
+    await destination.store(srcStudy, options);
 
     console.log(
       `🎉 Download complete. Study saved to: ${options.directory}/studies/${studyUID}`

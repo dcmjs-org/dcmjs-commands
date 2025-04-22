@@ -1,5 +1,5 @@
-import { logger } from "../utils";
-import type { JsonData, StudyNormal } from "./DicomWebTypes";
+import { logger, naturalize } from "../utils";
+import type { JsonData, StudyNatural, SeriesNatural } from "./DicomWebTypes";
 const log = logger.commandsLog.getLogger("DicomAccess");
 
 // Abstract base class for DICOM access implementations
@@ -61,33 +61,110 @@ export abstract class DicomAccess {
     return study;
   }
 
+  public store(study: StudyAccess): Promise<StudyAccess> {
+    const studyDestination = this.add(study.studyUID);
+    return studyDestination.store(study);
+  }
+
   public abstract createAccess(studyUID: string): StudyAccess;
 }
 
-export abstract class StudyAccess {
-  public readonly studyUID: string;
+export abstract class ChildType<ParentT, ChildT, NaturalT> {
+  public readonly uid: string;
+
+  public static childInfo: {
+    uidName: string;
+  };
+
+  public readonly childrenMap = new Map<string, ChildType<this, ChildT>>();
+  public readonly parent: ParentT;
+  public jsonData: JsonData;
+  public natural?: NaturalT;
   public readonly dicomAccess: DicomAccess;
+
+  constructor(parent: ParentT, uid: string, natural?: NaturalT) {
+    if (typeof uid !== "string") {
+      throw new Error(
+        `The provided uid (${JSON.stringify(uid)}) must be a string`
+      );
+    }
+    this.uid = uid;
+    this.parent = parent;
+    this.dicomAccess = (parent as any).dicomAccess || parent;
+    this.natural = natural;
+  }
+
+  public add(child: ChildType<this, ChildT, any>) {
+    if (!child.childrenMap) {
+      throw new Error(
+        `Use this.addJson to add another child map type to ${JSON.stringify(child)}`
+      );
+    }
+    const { uid } = child;
+    if (this.childrenMap.has(uid)) {
+      return this.childrenMap.get(uid);
+    }
+    const newChild = this.createAccess(uid, child.natural);
+    this.childrenMap.set(uid, newChild);
+    return newChild;
+  }
+
+  public addJson(json) {
+    if (json.childrenMap) {
+      throw new Error(
+        `Use this.add to add an access instance, have ${JSON.stringify(json.constructor?.childInfo)}`
+      );
+    }
+    const { uidName } = this.constructor.childInfo;
+    console.warn("Adding json data", uidName, !json.StudyInstanceUID && json);
+    const natural = json[uidName] ? json : naturalize(json);
+    const uid = json[uidName];
+    if (this.childrenMap.has(uid)) {
+      return this.childrenMap.get(uid);
+    }
+    const newChild = this.createAccess(uid, natural);
+    this.childrenMap.set(uid, newChild);
+    return newChild;
+  }
+
+  public async forEach(childListener) {
+    const processed = [];
+    const children = await this.queryChildren();
+    for (const child of children) {
+      processed.push(await childListener(child));
+    }
+    return processed;
+  }
+
+  public abstract queryChildren(): Promise<ChildT[]>;
+  public abstract createAccess(uid: string, natural?: NaturalT);
+}
+
+export abstract class StudyAccess extends ChildType<
+  DicomAccess,
+  SeriesAccess,
+  StudyNatural
+> {
+  public static readonly childInfo = {
+    uidName: "StudyInstanceUID",
+    shortUidName: "studyUID",
+    name: "Study",
+  };
+
+  public readonly studyUID: string;
   public readonly url: string;
 
-  public studyJson: JsonData;
-  public studyNormal: StudyNormal;
-
-  constructor(dicomAccess, studyUID) {
-    if (typeof dicomAccess !== "object") {
-      throw new Error(`DicomAccess must be an object ${dicomAccess}`);
-    }
-    this.dicomAccess = dicomAccess;
+  constructor(dicomAccess, studyUID, natural?: StudyNormal) {
+    super(dicomAccess, studyUID);
     this.studyUID = studyUID;
-    if (!this.studyUID) {
-      throw new Error("studyUID not defined");
-    }
     console.warn("study access url", dicomAccess.url, studyUID);
     this.url = `${dicomAccess.url}/${studyUID}`;
   }
 
   // Store all study-related content to the local SDW structure
   public async store(source) {
-    await source.forEachSeries(async (sourceSeries) => {
+    log.warn("Storing source", source.studyUID, "to destination", this.url);
+    await source.forEach(async (sourceSeries) => {
       log.warn("Got source series", sourceSeries.seriesUID);
       const destSeries = this.add(sourceSeries);
       if (!destSeries) {
@@ -95,52 +172,26 @@ export abstract class StudyAccess {
       }
       await destSeries.store(sourceSeries);
     });
+    log.warn("About to store study data");
     await this.storeStudyData(source);
+    return this;
   }
 
   public storeStudyData(source: StudyAccess) {
     log.warn("No study store implemented for", this);
   }
-
-  public abstract querySeries(constraints?): Promise<Array<SeriesAccess>>;
-
-  protected series = new Map<string, SeriesAccess>();
-
-  public add(series) {
-    if (this.series.has(series.seriesInstanceUID)) {
-      return this.series.get(series.seriesInstanceUID);
-    }
-    const newSeries = this.createAccess(series);
-    this.series.set(series.seriesInstanceUID, newSeries);
-    return newSeries;
-  }
-
-  public abstract createAccess(series);
 }
 
 /**
  * A series access allow getting to the series objects within a study.
  */
-export abstract class SeriesAccess {
-  public readonly seriesInstanceUID: string;
+export abstract class SeriesAccess extends ChildType<
+  StudyAccess,
+  InstanceAccess,
+  SeriesNatural
+> {}
 
-  protected instances = new Map<string, InstanceAccess>();
-
-  constructor(seriesInstanceUID: string) {
-    this.seriesInstanceUID = seriesInstanceUID;
-  }
-
-  public add(instance: InstanceAccess) {
-    if (this.instances.has(instance.sopInstanceUID)) {
-      return this.instances.get(instance.sopInstanceUID);
-    }
-    const newInstance = this.createAccess(instance);
-    this.instances.set(instance.sopInstanceUID, newInstance);
-    return newInstance;
-  }
-}
-
-export class InstanceAccess {
+export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
   public readonly sopInstanceUID: string;
   public readonly sopClassUID: string;
 }
