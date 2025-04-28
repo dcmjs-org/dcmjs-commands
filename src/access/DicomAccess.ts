@@ -210,6 +210,21 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
   public storeCurrentLevel(source) {
     console.warn("Storing current level", this.name, "is unimplemented");
   }
+
+  public isBulkdata(jsonNode) {
+    return jsonNode && jsonNode.BulkDataURI;
+  }
+
+  public getNatural() {
+    if (this.natural) {
+      return this.natural;
+    }
+    if (!this.jsonData) {
+      throw new Error("No json data to source for getting natural data");
+    }
+    this.natural = naturalize(this.jsonData);
+    return this.natural;
+  }
 }
 
 export abstract class StudyAccess extends ChildType<
@@ -230,7 +245,7 @@ export abstract class StudyAccess extends ChildType<
   public readonly url: string;
 
   constructor(dicomAccess, studyUID, natural?: StudyNormal) {
-    super(dicomAccess, studyUID);
+    super(dicomAccess, studyUID, natural);
     this.studyUID = studyUID;
     console.warn("study access url", dicomAccess.url, studyUID);
     this.url = `${dicomAccess.url}/${studyUID}`;
@@ -290,6 +305,11 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
   }
 
   public createAccess(sopUID, natural?) {
+    return null;
+  }
+
+  public openBulkdata(jsonNode) {
+    log.warn("Open bulkdata not implemented");
     return null;
   }
 }

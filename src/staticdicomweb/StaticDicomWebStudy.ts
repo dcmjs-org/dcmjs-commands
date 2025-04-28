@@ -25,6 +25,7 @@ export class StaticDicomWebStudy extends StudyAccess {
   }
 
   public createAccess(sopUID: string, natural) {
+    console.warn("Creating access on sopUID", sopUID);
     return new StaticDicomWebSeries(this, sopUID, natural);
   }
 

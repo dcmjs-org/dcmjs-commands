@@ -17,6 +17,10 @@ const action = async (url, options) => {
     const access = await DicomAccess.createInstance(url, options);
 
     const { StudyInstanceUID: studyUID } = options;
+    if (!studyUID) {
+      console.warn("Please provide a studyUID");
+      return -2;
+    }
     const srcStudy = await access.queryStudy(studyUID);
 
     await destination.store(srcStudy, options);
