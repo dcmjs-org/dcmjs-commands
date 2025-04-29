@@ -8,7 +8,7 @@ import path from "path";
  * requires syncing.
  */
 export const writeStream = (dir, nameSrc, options?) => {
-  const isGzip = nameSrc.indexOf(".gz") != -1 || options.gzip;
+  const isGzip = nameSrc.indexOf(".gz") != -1 || options?.gzip;
   const name =
     (isGzip && nameSrc.indexOf(".gz") === -1 && `${nameSrc}.gz`) || nameSrc;
   if (options?.mkdir) {

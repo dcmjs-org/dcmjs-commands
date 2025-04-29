@@ -1,5 +1,6 @@
-import { logger, naturalize } from "../utils";
+import { logger, naturalize, denaturalize } from "../utils";
 import type { JsonData, StudyNatural, SeriesNatural } from "./DicomWebTypes";
+import { selectSeries, selectInstance } from "./DicomWebTypes";
 const log = logger.commandsLog.getLogger("DicomAccess");
 
 // Abstract base class for DICOM access implementations
@@ -225,6 +226,11 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
     this.natural = naturalize(this.jsonData);
     return this.natural;
   }
+
+  /** Gets a child if available */
+  public getChild() {
+    return this.childrenMap.values().find(() => true);
+  }
 }
 
 export abstract class StudyAccess extends ChildType<
@@ -280,6 +286,44 @@ export abstract class SeriesAccess extends ChildType<
     this.url = `${parent.url}/series/${seriesUID}`;
     this.seriesUID = seriesUID;
   }
+
+  public getNumberOfFrames() {
+    let numberOfFrames = 0;
+    for (const instance of this.childrenMap.values()) {
+      const natural = instance.getNatural();
+      if (!natural.PhotometricInterpretation) {
+        continue;
+      }
+      const instanceFrames = natural.NumberOfFrames || 1;
+      numberOfFrames += instanceFrames;
+    }
+    return numberOfFrames;
+  }
+
+  /** Returns the json data for the current series query */
+  public createSeriesQuery() {
+    const naturalSeries = selectSeries(this.getChild().getNatural());
+    naturalSeries.NumberOfSeriesRelatedInstances = this.childrenMap.size;
+    naturalSeries.NumberOfFrames = this.getNumberOfFrames();
+    return naturalSeries;
+  }
+
+  /**
+   * Adds all the instance natural items to natural inside the
+   * instances object, considering each one as though it were a frame.
+   */
+  public addInstanceNaturalQuery(
+    natural,
+    children = [...this.childrenMap.values()]
+  ) {
+    console.warn(
+      "Adding instance natural query to series",
+      this.uid,
+      children.length
+    );
+    natural.Instances = [];
+    let instanceNo = 0;
+  }
 }
 
 export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
@@ -311,5 +355,10 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
   public openBulkdata(jsonNode) {
     log.warn("Open bulkdata not implemented");
     return null;
+  }
+
+  /** Returns the json data for the current series query */
+  public createInstanceQuery() {
+    return selectInstance(this.getNatural());
   }
 }

@@ -6,3 +6,10 @@ export function naturalize(json) {
   }
   return dcmjs.data.DicomMetaDictionary.naturalizeDataset(json);
 }
+
+export function denaturalize(natural) {
+  if (Array.isArray(natural)) {
+    return natural.map(denaturalize);
+  }
+  return dcmjs.data.DicomMetaDictionary.denaturalizeDataset(natural);
+}

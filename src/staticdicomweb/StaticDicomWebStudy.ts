@@ -22,6 +22,10 @@ export class StaticDicomWebStudy extends StudyAccess {
       this.url,
       "index and study json.gz"
     );
+    const seriesQuery = this.childrenMap
+      .values()
+      .map((series) => series.createSeriesQuery());
+    await saveJson(this.url, "series/index.json.gz", seriesQuery);
   }
 
   public createAccess(sopUID: string, natural) {

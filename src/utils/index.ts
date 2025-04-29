@@ -4,3 +4,4 @@ export * from "./saveJson";
 export * from "./loadJson";
 export { createDicomWebConfig } from "./createDicomWebConfig";
 export * from "./naturalize";
+export * from "./writeStream";

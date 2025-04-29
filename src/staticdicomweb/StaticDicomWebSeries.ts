@@ -12,11 +12,13 @@ export class StaticDicomWebSeries extends SeriesAccess {
     const json = await loadJson(this.url, "metadata.gz");
     const naturalJson = naturalize(json);
     log.warn("There are", naturalJson.length, "instances in series", this.uid);
-    return naturalJson.map((instance, idx) => {
-      const newInstance = this.addJson(instance);
-      newInstance.jsonData = json[idx];
-      return newInstance;
-    });
+    return [
+      ...naturalJson.map((instance, idx) => {
+        const newInstance = this.addJson(instance);
+        newInstance.jsonData = json[idx];
+        return newInstance;
+      }),
+    ];
   }
 
   public async storeCurrentLevel(source) {
@@ -35,6 +37,20 @@ export class StaticDicomWebSeries extends SeriesAccess {
     }
     log.warn("Storing series with", metadata.length, "instances");
     await saveJson(this.url, "metadata.gz", metadata);
+
+    const seriesQuery = this.createSeriesQuery();
+    await saveJson(this.url, "series-singleton.json.gz", seriesQuery);
+
+    const naturalSeriesQuery = naturalize(seriesQuery);
+    this.addInstanceNaturalQuery(naturalSeriesQuery);
+    await saveJson(this.url, "series-natural.json.gz", naturalSeriesQuery);
+
+    const instanceQuery = [
+      ...this.childrenMap
+        .values()
+        .map((instance) => instance.createInstanceQuery()),
+    ];
+    await saveJson(this.url, "index.json.gz", instanceQuery);
   }
 
   public createAccess(sopUID, natural?) {

@@ -1,5 +1,6 @@
-import { saveJson, loadJson, naturalize, logger } from "../utils";
+import { writeStream, logger } from "../utils";
 import { InstanceAccess } from "../access/DicomAccess";
+import { promises as fs } from "fs";
 
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
@@ -56,14 +57,29 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   public async storeBulkdataItem(key, source, child) {
-    console.warn("Storing chld item", key, child);
-    return child.BulkDataURI;
+    console.warn("Storing child bulkdata", key, child);
+    const { hashcode, extension, contentType } = await getBulkdataInfo(
+      key,
+      child
+    );
+    const bulkdata = await source.openBulkdata(key, child);
+
+    const bulkdataSeriesName = `../../bulkdata/${hashcode.substring(0, 3)}/${hashcode.substring(3, 6)}/${hashcode}.${extension}`;
+    const bulkdataInstanceName = `../../${bulkdataSeriesName}`;
+    const destBulkdata = writeStream(this.url, bulkdataInstanceName, {
+      mkdir: true,
+    });
+    await destBulkdata.write(bulkdata);
+    destBulkdata.close();
+
+    // Use the series name as all the paths are series relative
+    return bulkdataSeriesName;
   }
 
   public async storeFrames(source: InstanceAccess) {
     const naturalSource = source.getNatural();
-    if (!naturalSource.PhotometricInterpretation) {
-      log.warn("DICOM has no images", naturalSource);
+    if (!naturalSource?.PhotometricInterpretation) {
+      log.warn("DICOM has no images", this.uid, naturalSource);
       return;
     }
     const numFrames = naturalSource.NumberOfFrames || 1;
@@ -74,11 +90,27 @@ export class StaticDicomWebInstance extends InstanceAccess {
       this.storeThumbnailFrame(source, frame);
     }
     this.storeThumbnail(source);
-    this.storeRenderedFrame(source);
+    this.storeRendered(source);
+  }
+
+  public async openFrame(frame = 1) {
+    const path = `${this.url}/frames/${frame}.mht.gz`;
+    return fs.readFile(path);
   }
 
   public async storeFrame(source, frame) {
     log.warn("Storing frame", frame);
+    const sourceFrame = await source.openFrame(frame);
+    const destFrame = writeStream(`${this.url}/frames`, `${frame}.mht.gz`, {
+      mkdir: true,
+    });
+    if (sourceFrame.pipe) {
+      await sourceFrame.pipe(destFrame);
+    } else {
+      log.warn("Storing frame data", sourceFrame.length);
+      await destFrame.write(sourceFrame);
+    }
+    destFrame.close();
   }
 
   public async storeRenderedFrame(source, frame) {
