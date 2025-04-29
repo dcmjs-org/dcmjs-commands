@@ -11,6 +11,7 @@ export abstract class DicomAccess {
 
   public readonly url: string;
   public readonly options;
+  protected client;
 
   private studies = new Map<string, StudyAccess>();
 
