@@ -8,7 +8,7 @@ const action = async (url, options) => {
     });
 
     // Create access instance (currently supports only DICOMweb)
-    console.log(
+    console.debug(
       "🔌 Creating DICOM access instance...",
       url,
       "to",

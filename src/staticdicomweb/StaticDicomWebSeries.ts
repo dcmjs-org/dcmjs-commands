@@ -11,7 +11,7 @@ export class StaticDicomWebSeries extends SeriesAccess {
     }
     const json = await loadJson(this.url, "metadata.gz");
     const naturalJson = naturalize(json);
-    log.warn("There are", naturalJson.length, "instances in series", this.uid);
+    log.info("There are", naturalJson.length, "instances in series", this.uid);
     return [
       ...naturalJson.map((instance, idx) => {
         const newInstance = this.addJson(instance);

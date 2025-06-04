@@ -141,7 +141,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
     const { childUid } = this;
     const natural = json[childUid] ? json : naturalize(json);
     const uid = json[childUid];
-    console.warn(
+    log.info(
       "Adding to",
       this.url[0] === "." ? "destination" : "source",
       this.name,
@@ -187,7 +187,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
       }
       await destChild.store(childSource);
     });
-    log.warn(
+    log.info(
       "Finished storing children for",
       this.name,
       this.uid,
@@ -254,7 +254,7 @@ export abstract class StudyAccess extends ChildType<
   constructor(dicomAccess, studyUID, natural?: StudyNormal) {
     super(dicomAccess, studyUID, natural);
     this.studyUID = studyUID;
-    console.warn("study access url", dicomAccess.url, studyUID);
+    log.debug("study access url", dicomAccess.url, studyUID);
     this.url = `${dicomAccess.url}/${studyUID}`;
   }
 

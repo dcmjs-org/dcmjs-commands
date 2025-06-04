@@ -10,7 +10,7 @@ export class StaticDicomWebStudy extends StudyAccess {
     const json = await loadJson(this.url, "index.json.gz");
     this.jsonData = json;
     this.natural = naturalize(json);
-    log.warn("Read study normal data", !!this.natural);
+    log.debug("Read study normal data", !!this.natural);
   }
 
   // Save study-level metadata

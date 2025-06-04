@@ -1,6 +1,7 @@
 import { writeStream, logger } from "../utils";
 import { InstanceAccess } from "../access/DicomAccess";
-import { promises as fs } from "fs";
+import fsBase from "fs";
+import { pipeline } from "node:stream/promises";
 
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
@@ -17,9 +18,9 @@ export class StaticDicomWebInstance extends InstanceAccess {
 
     this.jsonData = structuredClone(source.jsonData);
 
-    this.storeBulkdata(source);
+    await this.storeBulkdata(source);
 
-    this.storeFrames(source);
+    await this.storeFrames(source);
   }
 
   /**
@@ -85,45 +86,63 @@ export class StaticDicomWebInstance extends InstanceAccess {
     const numFrames = naturalSource.NumberOfFrames || 1;
 
     for (let frame = 1; frame <= numFrames; frame++) {
-      this.storeFrame(source, frame);
-      this.storeRenderedFrame(source, frame);
-      this.storeThumbnailFrame(source, frame);
+      await this.storeFrame(source, frame);
     }
-    this.storeThumbnail(source);
-    this.storeRendered(source);
+    await this.storeRendered(source);
   }
 
-  public async openFrame(frame = 1) {
-    const path = `${this.url}/frames/${frame}.mht.gz`;
-    return fs.readFile(path);
+  /** Opens the frame.  Options allow choosing to get compressed/encapsulated data back */
+  public async openFrame(frame = 1, _options?) {
+    const path = `${this.url}/frames/${frame}.mht`;
+    if (fsBase.existsSync(path)) {
+      console.warn("Getting uncompressed but encapsulated");
+      return {
+        stream: await fsBase.createReadStream(path),
+        compressed: false,
+        encapsulated: true,
+      };
+    }
+    const gzPath = `${path}.gz`;
+    if (fsBase.existsSync(gzPath)) {
+      console.warn("Get compressed and encapsulated data");
+      return {
+        stream: await fsBase.createReadStream(gzPath),
+        compressed: true,
+        encapsulated: true,
+      };
+    }
+    console.warn("No frame file found for", this.url, frame);
   }
 
   public async storeFrame(source, frame) {
-    log.warn("Storing frame", frame);
-    const sourceFrame = await source.openFrame(frame);
-    const destFrame = writeStream(`${this.url}/frames`, `${frame}.mht.gz`, {
-      mkdir: true,
-    });
-    if (sourceFrame.pipe) {
-      await sourceFrame.pipe(destFrame);
-    } else {
-      log.warn("Storing frame data", sourceFrame.length);
-      await destFrame.write(sourceFrame);
+    log.warn("**************************** Storing frame", frame);
+    const { stream, buffer, compressed, encapsulated } = await source.openFrame(
+      frame,
+      {
+        compressed: true,
+        encapsulated: true,
+      }
+    );
+    log.info("Read from", frame, stream.length);
+    const destFile = writeStream(
+      `${this.url}/frames`,
+      `${frame}${encapsulated ? ".mht" : ""}${compressed ? ".gz" : ""}`,
+      {
+        mkdir: true,
+        compressed,
+      }
+    );
+    if (stream.pipe) {
+      log.trace("Found pipe");
+      await stream.pipe(destFile);
+    } else if (buffer) {
+      log.trace("Writing buffer direct");
+      await destFile.write(buffer);
     }
-    destFrame.close();
+    await destFile.closePromise;
   }
 
-  public async storeRenderedFrame(source, frame) {
-    log.debug("Storing rendered frame", frame);
-  }
-  public async storeThumbnailFrame(source, frame) {
-    log.debug("Storing thumbnail frame", frame);
-  }
-  public async storeThumbnail(source) {
-    log.warn("Storing thumbnail for instance overall");
-  }
-
-  public async storeRendered(source) {
-    log.warn("Storing rendered overall for instance", this.uid);
+  public async storeRendered(source, frame) {
+    log.debug("TODO - Storing rendered frame", frame);
   }
 }

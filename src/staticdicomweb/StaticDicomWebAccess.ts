@@ -13,7 +13,7 @@ const log = commandsLog.getLogger("StaticDicomWebAccess");
 export class StaticDicomWebAccess extends DicomAccess {
   public createIfNeeded(options) {
     if (!options || options?.create) {
-      log.info("Creating destination static dicom web at:", this.url);
+      log.debug("Creating destination static dicom web at:", this.url);
       fs.mkdirSync(this.url, { recursive: true });
     }
   }

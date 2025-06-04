@@ -1,6 +1,9 @@
 import fs from "fs";
 import zlib from "zlib";
 import path from "path";
+import { commandsLog } from "./logger";
+
+const log = commandsLog.getLogger("writeStream");
 
 /** Create an optionally gzipped stream,
  * where the write operations are performed in order executed,
@@ -8,7 +11,8 @@ import path from "path";
  * requires syncing.
  */
 export const writeStream = (dir, nameSrc, options?) => {
-  const isGzip = nameSrc.indexOf(".gz") != -1 || options?.gzip;
+  const isGzip =
+    !options?.compressed && (nameSrc.indexOf(".gz") != -1 || options?.gzip);
   const name =
     (isGzip && nameSrc.indexOf(".gz") === -1 && `${nameSrc}.gz`) || nameSrc;
   if (options?.mkdir) {
@@ -22,36 +26,30 @@ export const writeStream = (dir, nameSrc, options?) => {
   const finalName = path.join(dir, name);
   const rawStream = fs.createWriteStream(tempName);
   const closePromise = new Promise((resolve) => {
-    rawStream.on("close", () => {
-      resolve("closed");
+    rawStream.on("close", async () => {
+      log.debug("Renaming", tempName, finalName);
+      await fs.rename(tempName, finalName, () => true);
+      log.trace("Renamed", tempName, finalName);
+      resolve(finalName);
     });
   });
 
-  const writeStream = isGzip ? zlib.createGzip() : rawStream;
+  const outStream = isGzip ? zlib.createGzip() : rawStream;
   if (isGzip) {
-    writeStream.pipe(rawStream);
-    writeStream.on("close", () => {
+    outStream.pipe(rawStream);
+    outStream.on("close", async () => {
+      log.trace("write stream being closed", tempName, finalName);
       rawStream.close();
     });
   }
 
-  async function close() {
-    await this.writeStream.end();
-    await this.closePromise;
-    console.warn("Renaming", tempName, finalName);
-    await fs.rename(tempName, finalName, () => true); // console.log('Renamed', tempName,finalName));
-  }
-
-  return {
-    writeStream,
-    closePromise,
-
-    write(data) {
-      return this.writeStream.write(data);
-    },
-
-    close,
+  outStream.oldClose = outStream.close;
+  outStream.closePromise = closePromise;
+  outStream.close = async () => {
+    await outStream.oldClose();
+    return closePromise;
   };
+  return outStream;
 };
 
 export default writeStream;
