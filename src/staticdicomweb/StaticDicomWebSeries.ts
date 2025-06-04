@@ -35,7 +35,7 @@ export class StaticDicomWebSeries extends SeriesAccess {
       );
       return;
     }
-    log.warn("Storing series with", metadata.length, "instances");
+    log.info("Storing series with", metadata.length, "instances");
     await saveJson(this.url, "metadata.gz", metadata);
 
     const seriesQuery = this.createSeriesQuery();
@@ -54,7 +54,7 @@ export class StaticDicomWebSeries extends SeriesAccess {
   }
 
   public createAccess(sopUID, natural?) {
-    console.warn("Creating instance SDW access", sopUID, this.url);
+    log.trace("Creating instance SDW access", sopUID, this.url);
     return new StaticDicomWebInstance(this, sopUID, natural);
   }
 }

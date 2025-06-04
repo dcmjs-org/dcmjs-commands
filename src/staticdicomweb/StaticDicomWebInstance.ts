@@ -95,7 +95,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
   public async openFrame(frame = 1, _options?) {
     const path = `${this.url}/frames/${frame}.mht`;
     if (fsBase.existsSync(path)) {
-      console.warn("Getting uncompressed but encapsulated");
+      log.debug("Getting uncompressed but encapsulated");
       return {
         stream: await fsBase.createReadStream(path),
         compressed: false,
@@ -104,7 +104,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
     }
     const gzPath = `${path}.gz`;
     if (fsBase.existsSync(gzPath)) {
-      console.warn("Get compressed and encapsulated data");
+      log.debug("Get compressed and encapsulated data");
       return {
         stream: await fsBase.createReadStream(gzPath),
         compressed: true,
@@ -115,7 +115,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   public async storeFrame(source, frame) {
-    log.warn("**************************** Storing frame", frame);
+    log.debug("Storing frame", frame);
     const { stream, buffer, compressed, encapsulated } = await source.openFrame(
       frame,
       {
@@ -123,7 +123,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
         encapsulated: true,
       }
     );
-    log.info("Read from", frame, stream.length);
+    log.debug("Read from", frame, stream.length);
     const destFile = writeStream(
       `${this.url}/frames`,
       `${frame}${encapsulated ? ".mht" : ""}${compressed ? ".gz" : ""}`,

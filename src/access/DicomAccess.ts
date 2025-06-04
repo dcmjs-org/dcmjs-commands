@@ -119,7 +119,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
     if (this.childrenMap.has(uid)) {
       return this.childrenMap.get(uid);
     }
-    console.warn(
+    log.info(
       "Adding child",
       child.name,
       child.uid,
@@ -169,7 +169,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
    * Store data at hte current level and children levels (if any)
    */
   public async store(source) {
-    log.warn(
+    log.info(
       "Storing source",
       this.name,
       source.uid,
@@ -178,7 +178,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
       this.url
     );
     await source.forEach(async (childSource) => {
-      log.warn("Got source", this.name, childSource.uid);
+      log.debug("Got source", this.name, childSource.uid);
       const destChild = this.add(childSource);
       if (!destChild) {
         throw new Error(

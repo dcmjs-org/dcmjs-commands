@@ -1,6 +1,7 @@
 import { saveJson, loadJson, naturalize, logger } from "../utils";
 import { StudyAccess, SeriesAccess } from "../access/DicomAccess";
 import { StaticDicomWebSeries } from "./StaticDicomWebSeries";
+import { denaturalize } from "../utils";
 
 const log = logger.commandsLog.getLogger("StaticDicomWebStudy");
 
@@ -17,19 +18,18 @@ export class StaticDicomWebStudy extends StudyAccess {
   async storeCurrentLevel(source: StudyAccess) {
     await saveJson(this.url, "index.json.gz", source.jsonData);
     await saveJson(this.url, "study.json.gz", source.natural);
-    console.warn(
-      "Study metadata saved to",
-      this.url,
-      "index and study json.gz"
-    );
-    const seriesQuery = this.childrenMap
-      .values()
-      .map((series) => series.createSeriesQuery());
+    log.info("Study metadata saved to", this.url, "index and study json.gz");
+    const seriesQuery = [];
+    for (const seriesAccess of this.childrenMap.values()) {
+      const seriesData = seriesAccess.createSeriesQuery();
+      seriesQuery.push(denaturalize(seriesData));
+    }
+    console.info("Series query saved to", this.url, "series/index.json.gz");
     await saveJson(this.url, "series/index.json.gz", seriesQuery);
   }
 
   public createAccess(sopUID: string, natural) {
-    console.warn("Creating access on sopUID", sopUID);
+    log.debug("Creating access on sopUID", sopUID);
     return new StaticDicomWebSeries(this, sopUID, natural);
   }
 
