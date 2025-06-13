@@ -125,7 +125,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
       child.uid,
       "to",
       this.name,
-      this.url[0] === "." ? "destination" : "srouce"
+      this.url[0] === "." ? "destination" : "source"
     );
     const newChild = this.createAccess(uid, child.natural);
     this.childrenMap.set(uid, newChild);

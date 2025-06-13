@@ -10,7 +10,11 @@ export class DicomWebAccess extends DicomAccess {
   constructor(url, options) {
     super(url, options);
     log.warn("Hello DicomWebAccess", url);
-    this.client = new DICOMwebClient.api.DICOMwebClient({ url });
+    this.client = new DICOMwebClient.api.DICOMwebClient({
+      url,
+      verbose: false,
+    });
+    log.warn("Created DICOMwebclient api", !!this.client);
   }
 
   public createAccess(studyUID: string, natural?: StudyNatural) {
