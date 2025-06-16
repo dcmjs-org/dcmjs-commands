@@ -2,6 +2,7 @@ import { writeStream, logger } from "../utils";
 import { InstanceAccess } from "../access/DicomAccess";
 import fsBase from "fs";
 import { finished } from "stream/promises";
+import { getBulkdataInfo } from "../utils/getBulkdataInfo";
 
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
@@ -54,25 +55,27 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   public async storeBulkdataItem(key, source, child) {
-    console.warn("Storing child bulkdata", key, child);
-    const { hashcode, extension, contentType } = await getBulkdataInfo(
-      key,
-      child
-    );
     const bulkdata = await source.openBulkdata(key, child);
     if (!bulkdata) {
       throw new Error(`Unable to read bulkdata ${key} from source ${source}`);
     }
+    const { hashCode, extension } = await getBulkdataInfo(key, child, bulkdata);
 
-    const bulkdataSeriesName = `../../bulkdata/${hashcode.substring(0, 3)}/${hashcode.substring(3, 6)}/${hashcode}.${extension}`;
-    const bulkdataInstanceName = `../../${bulkdataSeriesName}`;
-    const destBulkdata = await writeStream(this.url, bulkdataInstanceName, {
+    const bulkdataSeriesDir = `../../bulkdata/${hashCode.substring(0, 3)}/${hashCode.substring(3, 6)}`;
+    const bulkdataInstanceDir = `../../${bulkdataSeriesDir}`;
+    const filename = `${hashCode}.${extension}`;
+    const bulkdataSeriesName = `${bulkdataSeriesDir}/${filename}`;
+
+    const rootBulkdata = `${this.url}/${bulkdataInstanceDir}`;
+    if (await fsBase.promises.exists(`${rootBulkdata}/filename`)) {
+      return bulkdataSeriesName;
+    }
+    const destBulkdata = await writeStream(rootBulkdata, filename, {
       mkdir: true,
     });
-    console.warn("Storing bulkdata item", bulkdata);
-    await destBulkdata.writeWithPromise(bulkdata);
-    destBulkdata.close();
-    console.warn("End bulkdata item", bulkdata);
+    log.info("Storing bulkdata item", bulkdataSeriesName, bulkdata.length);
+    await destBulkdata.writeWithPromise(new Uint8Array(bulkdata));
+    await destBulkdata.close();
 
     // Use the series name as all the paths are series relative
     return bulkdataSeriesName;

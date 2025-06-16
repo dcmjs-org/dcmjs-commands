@@ -21,4 +21,18 @@ export class DicomWebInstance extends InstanceAccess {
       compressed: false,
     };
   }
+
+  public async openBulkdata(key, child) {
+    let bulkDataURI = child.BulkDataURI;
+    // Handle static DICOMweb references, allowed but not supported by the dicomweb
+    // library.  Other relative references will have to be fixed/handled later.
+    if (bulkDataURI.startsWith("bulkdata/")) {
+      bulkDataURI = `${this.parent.parent.url}/${bulkDataURI}`;
+    }
+    const bulk = await this.dicomAccess.client.retrieveBulkData({
+      studyInstanceUID: this.parent.parent.uid,
+      BulkDataURI: bulkDataURI,
+    });
+    return bulk[0];
+  }
 }

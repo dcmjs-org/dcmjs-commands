@@ -22,9 +22,9 @@ export class StaticDicomWebStudy extends StudyAccess {
       );
     }
     await saveJson(this.url, "index.json.gz", source.jsonData);
-    console.warn("Storing study json", !!source.natural);
+    console.info("Storing study json", !!source.natural);
     await saveJson(this.url, "study.json.gz", source.natural);
-    log.warn("Study metadata saved to", this.url, "index and study json.gz");
+    log.info("Study metadata saved to", this.url, "index and study json.gz");
     const seriesQuery = [];
     for (const seriesAccess of this.childrenMap.values()) {
       const seriesData = seriesAccess.createSeriesQuery();

@@ -46,11 +46,7 @@ export default async function cliDownload(program) {
       "-S, --StudyInstanceUID <StudyInstanceUID>",
       "StudyInstanceUID to download"
     )
-    .option(
-      "-d, --directory <targetDir>",
-      "Download to local directory",
-      "./studies"
-    )
+    .option("-d, --directory <targetDir>", "Download to local directory", ".")
     .option("--debug", "Enable debug logging")
     .action(action);
 }

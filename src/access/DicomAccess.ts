@@ -255,7 +255,7 @@ export abstract class StudyAccess extends ChildType<
     super(dicomAccess, studyUID, natural);
     this.studyUID = studyUID;
     log.debug("study access url", dicomAccess.url, studyUID);
-    this.url = `${dicomAccess.url}/${studyUID}`;
+    this.url = `${dicomAccess.url}/studies/${studyUID}`;
   }
 
   public storeStudyData(source: StudyAccess) {
