@@ -19,7 +19,7 @@ export class DicomWebStudy extends StudyAccess {
   }
 
   public async read() {
-    console.warn("Querying dicomweb for study", this.uid);
+    log.warn("Querying dicomweb for study", this.uid);
     const json = await this.dicomAccess.client.searchForStudies({
       queryParams: {
         studyInstanceUID: this.uid,
@@ -29,6 +29,8 @@ export class DicomWebStudy extends StudyAccess {
     if (!json) {
       throw new Error(`No study results found for ${this.uid}`);
     }
+    this.jsonData = json;
+    this.natural = naturalize(json);
   }
 
   public createAccess(sopUID: string, natural) {
@@ -40,12 +42,12 @@ export class DicomWebStudy extends StudyAccess {
     if (this.childrenMap.size) {
       return [...this.childrenMap.values()];
     }
-    console.warn("About to query for series in study", this.uid);
+    log.info("About to query for series in study", this.uid);
     const json = await this.dicomAccess.client.searchForSeries({
       studyInstanceUID: this.uid,
     });
     const naturalJson = naturalize(json);
-    console.warn("Found series #", naturalJson.length);
+    log.debug("Found series count=", naturalJson.length);
     return naturalJson.map((series) => this.addJson(series));
   }
 }

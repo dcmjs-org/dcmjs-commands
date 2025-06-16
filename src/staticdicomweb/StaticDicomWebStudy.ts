@@ -16,16 +16,28 @@ export class StaticDicomWebStudy extends StudyAccess {
 
   // Save study-level metadata
   async storeCurrentLevel(source: StudyAccess) {
+    if (!source.jsonData) {
+      throw new Error(
+        `Unable to store at level ${this.name} source data ${source.uid} from ${source.url}`
+      );
+    }
     await saveJson(this.url, "index.json.gz", source.jsonData);
+    console.warn("Storing study json", !!source.natural);
     await saveJson(this.url, "study.json.gz", source.natural);
-    log.info("Study metadata saved to", this.url, "index and study json.gz");
+    log.warn("Study metadata saved to", this.url, "index and study json.gz");
     const seriesQuery = [];
     for (const seriesAccess of this.childrenMap.values()) {
       const seriesData = seriesAccess.createSeriesQuery();
       seriesQuery.push(denaturalize(seriesData));
     }
-    console.info("Series query saved to", this.url, "series/index.json.gz");
+    console.warn(
+      "Series query saved to",
+      this.url,
+      "series/index.json.gz",
+      !!seriesQuery
+    );
     await saveJson(this.url, "series/index.json.gz", seriesQuery);
+    console.warn("Done storing current level is study");
   }
 
   public createAccess(sopUID: string, natural) {

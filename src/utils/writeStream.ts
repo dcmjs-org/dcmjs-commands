@@ -10,13 +10,13 @@ const log = commandsLog.getLogger("writeStream");
  * and don't require synchronization, only the 'close' operation
  * requires syncing.
  */
-export const writeStream = (dir, nameSrc, options?) => {
+export const writeStream = async (dir, nameSrc, options?) => {
   const isGzip =
     !options?.compressed && (nameSrc.indexOf(".gz") != -1 || options?.gzip);
   const name =
     (isGzip && nameSrc.indexOf(".gz") === -1 && `${nameSrc}.gz`) || nameSrc;
   if (options?.mkdir) {
-    fs.mkdirSync(dir, { recursive: true });
+    await fs.promises.mkdir(dir, { recursive: true });
   }
 
   const tempName = path.join(
@@ -28,7 +28,7 @@ export const writeStream = (dir, nameSrc, options?) => {
   const closePromise = new Promise((resolve) => {
     rawStream.on("close", async () => {
       log.debug("Renaming", tempName, finalName);
-      await fs.rename(tempName, finalName, () => true);
+      await fs.promises.rename(tempName, finalName);
       log.trace("Renamed", tempName, finalName);
       resolve(finalName);
     });
@@ -42,6 +42,26 @@ export const writeStream = (dir, nameSrc, options?) => {
       rawStream.close();
     });
   }
+
+  outStream.writeWithPromise = function (chunk) {
+    if (!chunk) {
+      throw new Error("Can't write with promise because chunk isn't defined");
+    }
+    return new Promise((resolve, reject) => {
+      const canWrite = this.write(chunk, null, (err) => {
+        if (err) reject(err);
+        else resolve(); // optional for immediate completion
+      });
+
+      // If write returns false, wait for 'drain'
+      if (!canWrite) {
+        this.once("drain", resolve);
+      } else {
+        // If write returns true, it's safe to resolve now
+        resolve();
+      }
+    });
+  };
 
   outStream.oldClose = outStream.close;
   outStream.closePromise = closePromise;

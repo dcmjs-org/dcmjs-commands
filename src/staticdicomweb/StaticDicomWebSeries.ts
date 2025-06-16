@@ -35,7 +35,6 @@ export class StaticDicomWebSeries extends SeriesAccess {
       );
       return;
     }
-    log.info("Storing series with", metadata.length, "instances");
     await saveJson(this.url, "metadata.gz", metadata);
 
     const seriesQuery = this.createSeriesQuery();

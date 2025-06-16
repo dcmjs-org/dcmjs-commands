@@ -23,7 +23,7 @@ export class DicomWebSeries extends SeriesAccess {
     );
     return [
       ...naturalJson.map((instance, idx) => {
-        console.warn("Adding instance", instance);
+        log.trace("Adding instance", instance);
         const newInstance = this.addJson(instance);
         newInstance.jsonData = json[idx];
         return newInstance;

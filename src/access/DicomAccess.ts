@@ -317,13 +317,7 @@ export abstract class SeriesAccess extends ChildType<
     natural,
     children = [...this.childrenMap.values()]
   ) {
-    console.warn(
-      "Adding instance natural query to series",
-      this.uid,
-      children.length
-    );
-    natural.Instances = [];
-    let instanceNo = 0;
+    natural.Instances = children;
   }
 }
 

@@ -29,7 +29,7 @@ const action = async (url, options) => {
       `🎉 Download complete. Study saved to: ${options.directory}/studies/${studyUID}`
     );
   } catch (err) {
-    console.error("❌ An error occurred during download:", err);
+    console.warn("❌ An error occurred during download:", err);
     process.exit(1);
   }
 

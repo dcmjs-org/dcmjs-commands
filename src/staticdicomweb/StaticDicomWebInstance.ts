@@ -1,7 +1,7 @@
 import { writeStream, logger } from "../utils";
 import { InstanceAccess } from "../access/DicomAccess";
 import fsBase from "fs";
-import { pipeline } from "node:stream/promises";
+import { finished } from "stream/promises";
 
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
@@ -10,11 +10,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
     if (!source.jsonData) {
       throw new Error(`No json data for instance ${source.uid}`);
     }
-    log.warn(
-      "Storing instance access",
-      source.uid,
-      "to destination with jsonData"
-    );
+    log.warn("Storing instance access", source.uid);
 
     this.jsonData = structuredClone(source.jsonData);
 
@@ -64,14 +60,19 @@ export class StaticDicomWebInstance extends InstanceAccess {
       child
     );
     const bulkdata = await source.openBulkdata(key, child);
+    if (!bulkdata) {
+      throw new Error(`Unable to read bulkdata ${key} from source ${source}`);
+    }
 
     const bulkdataSeriesName = `../../bulkdata/${hashcode.substring(0, 3)}/${hashcode.substring(3, 6)}/${hashcode}.${extension}`;
     const bulkdataInstanceName = `../../${bulkdataSeriesName}`;
-    const destBulkdata = writeStream(this.url, bulkdataInstanceName, {
+    const destBulkdata = await writeStream(this.url, bulkdataInstanceName, {
       mkdir: true,
     });
-    await destBulkdata.write(bulkdata);
+    console.warn("Storing bulkdata item", bulkdata);
+    await destBulkdata.writeWithPromise(bulkdata);
     destBulkdata.close();
+    console.warn("End bulkdata item", bulkdata);
 
     // Use the series name as all the paths are series relative
     return bulkdataSeriesName;
@@ -111,35 +112,63 @@ export class StaticDicomWebInstance extends InstanceAccess {
         encapsulated: true,
       };
     }
-    console.warn("No frame file found for", this.url, frame);
+    throw new Error(`No frame file found for ${this.url} for frame ${frame}`);
   }
 
   public async storeFrame(source, frame) {
     log.debug("Storing frame", frame);
-    const { stream, buffer, compressed, encapsulated } = await source.openFrame(
-      frame,
-      {
-        compressed: true,
-        encapsulated: true,
-      }
-    );
-    log.debug("Read from", frame, stream.length);
-    const destFile = writeStream(
+    const frameData = await source.openFrame(frame, {
+      compressed: true,
+      encapsulated: true,
+    });
+    const {
+      stream,
+      buffer,
+      compressed,
+      encapsulated,
+      contentType = "application/octet-stream",
+      transferSyntaxUID,
+    } = frameData;
+    if (!frameData || !(frameData.buffer || frameData.stream)) {
+      console.warn("Unable to read frame", !!buffer, !!stream);
+      return null;
+    }
+    const frameOut = await writeStream(
       `${this.url}/frames`,
-      `${frame}${encapsulated ? ".mht" : ""}${compressed ? ".gz" : ""}`,
+      `${frame}.mht${compressed ? ".gz" : ""}`,
       {
         mkdir: true,
         compressed,
       }
     );
-    if (stream.pipe) {
+    if (stream?.pipe) {
       log.trace("Found pipe");
-      await stream.pipe(destFile);
+      stream.pipe(frameOut);
+      await finished(frameOut);
     } else if (buffer) {
-      log.trace("Writing buffer direct");
-      await destFile.write(buffer);
+      const boundary = crypto.randomUUID();
+      if (!encapsulated) {
+        log.debug(
+          "Writing multipart/related encapsulation",
+          contentType,
+          transferSyntaxUID
+        );
+        if (!transferSyntaxUID) {
+          throw new Error(
+            `Must supply a transferSyntaxUID for unencapsulated writes, but got only ${contentType}`
+          );
+        }
+        await frameOut.writeWithPromise(
+          `--${boundary}\r\nContent-Type: ${contentType};transfer-syntax=${transferSyntaxUID}\r\n\r\n`
+        );
+      }
+      await frameOut.writeWithPromise(new Uint8Array(buffer));
+      if (!encapsulated) {
+        await frameOut.writeWithPromise(`\r\n--${boundary}--`);
+      }
+      await frameOut.close();
     }
-    await destFile.closePromise;
+    await frameOut.closePromise;
   }
 
   public async storeRendered(source, frame) {
