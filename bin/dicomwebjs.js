@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { dicomweb, instanceDicom, dumpDicom } from "../src/index.js";
 import cliDownload from "./cliDownload.js";
+import cliPart10 from "./cliPart10.js";
 
 const program = new Command();
 
@@ -42,5 +43,6 @@ program
   });
 
 cliDownload(program);
+cliPart10(program);
 
 program.parse();

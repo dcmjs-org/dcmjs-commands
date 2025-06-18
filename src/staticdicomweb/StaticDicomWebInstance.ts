@@ -3,11 +3,13 @@ import { InstanceAccess } from "../access/DicomAccess";
 import fsBase from "fs";
 import { finished } from "stream/promises";
 import { getBulkdataInfo } from "../utils/getBulkdataInfo";
+import dcmjs from "dcmjs";
 
+const { DicomDict } = dcmjs.data;
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
 export class StaticDicomWebInstance extends InstanceAccess {
-  public async storeCurrentLevel(source: InstanceAccess): void {
+  public async storeCurrentLevel(source: InstanceAccess, options): void {
     if (!source.jsonData) {
       throw new Error(`No json data for instance ${source.uid}`);
     }
@@ -15,9 +17,31 @@ export class StaticDicomWebInstance extends InstanceAccess {
 
     this.jsonData = structuredClone(source.jsonData);
 
-    await this.storeBulkdata(source);
+    if (options?.bulkdata !== false) {
+      await this.storeBulkdata(source);
+    }
 
-    await this.storeFrames(source);
+    if (options?.frames !== false) {
+      await this.storeFrames(source);
+    }
+
+    if (options?.part10) {
+      await this.storePart10(source, options);
+    }
+  }
+
+  public async storePart10(source, options) {
+    const json = structuredClone(source.jsonData);
+    console.warn("******** Storing part 10", this.uid);
+    const fmi = await source.importBulkdata(json, options);
+    console.warn("Generate fmi=", fmi);
+    console.warn("Converting to binary", json);
+    const dicomDict = new DicomDict(fmi);
+    dicomDict.dict = json;
+    const part10Buffer = dicomDict.write();
+    const dicomOut = await writeStream(this.url, "part10.dcm");
+    await dicomOut.writeWithPromise(part10Buffer);
+    await dicomOut.close();
   }
 
   /**

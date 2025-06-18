@@ -2,11 +2,38 @@ import { logger, naturalize, denaturalize } from "../utils";
 import type { JsonData, StudyNatural, SeriesNatural } from "./DicomWebTypes";
 import { selectSeries, selectInstance } from "./DicomWebTypes";
 const log = logger.commandsLog.getLogger("DicomAccess");
+const { dicomIssueLog } = logger;
 
 // Abstract base class for DICOM access implementations
 export abstract class DicomAccess {
   public static readonly childInfo = {
     childUid: "StudyInstanceUID",
+  };
+
+  public static DICOMWEB_OPTIONS = {
+    singleStudy: true,
+    singleSeries: true,
+    part10: false,
+    seriesMetadata: true,
+    frames: true,
+    rendered: false,
+    thumbnail: false,
+    studyMetadata: false,
+    instanceMetadata: false,
+    bulkdata: true,
+  };
+
+  public static PART10_OPTIONS = {
+    singleStudy: false,
+    singleSeries: false,
+    part10: true,
+    seriesMetadata: false,
+    frames: false,
+    rendered: false,
+    thumbnail: false,
+    studyMetadata: false,
+    instanceMetadata: false,
+    bulkdata: false,
   };
 
   public readonly url: string;
@@ -67,9 +94,9 @@ export abstract class DicomAccess {
     return study;
   }
 
-  public store(study: StudyAccess): Promise<StudyAccess> {
+  public store(study: StudyAccess, options): Promise<StudyAccess> {
     const studyDestination = this.add(study.studyUID);
-    return studyDestination.store(study);
+    return studyDestination.store(study, options);
   }
 
   public abstract createAccess(studyUID: string): StudyAccess;
@@ -168,7 +195,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
   /**
    * Store data at hte current level and children levels (if any)
    */
-  public async store(source) {
+  public async store(source, options) {
     log.info(
       "Storing source",
       this.name,
@@ -185,7 +212,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
           `Unable to create ${childSource.name} ${childSource.uid}`
         );
       }
-      await destChild.store(childSource);
+      await destChild.store(childSource, options);
     });
     log.info(
       "Finished storing children for",
@@ -194,7 +221,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
       this.childrenMap.size,
       source.childrenMap.size
     );
-    await this.storeCurrentLevel(source);
+    await this.storeCurrentLevel(source, options);
     return this;
   }
 
@@ -209,7 +236,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
   public abstract queryChildren(): Promise<ChildT[]>;
   public abstract createAccess(uid: string, natural?: NaturalT);
 
-  public storeCurrentLevel(source) {
+  public storeCurrentLevel(_source, _options) {
     console.warn("Storing current level", this.name, "is unimplemented");
   }
 
@@ -355,5 +382,46 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
   /** Returns the json data for the current series query */
   public createInstanceQuery() {
     return selectInstance(this.getNatural());
+  }
+
+  /**
+   * Imports BulkDataURI and frame data into the json object.
+   */
+  public async importBulkdata(json, options, fmi?) {
+    if (!fmi) {
+      fmi = {
+        "00020010": { vr: "UI", Value: ["1.2.840.10008.1.2.1"] },
+      };
+    }
+    for (const [key, value] of Object.entries(json)) {
+      if (value.vr === "SQ" && value.Value) {
+        for (const child of value.Value) {
+          this.importBulkdata(child, options, fmi);
+        }
+        continue;
+      }
+      if (!value.vr) {
+        value.vr = "UN";
+      }
+      if (value.vr === "CS" && value.Value?.[0]?.length > 16) {
+        if (value.Value[0].length !== 17 || value.Value[0][16] !== "\\") {
+          dicomIssueLog.warn(
+            "Invalid tag",
+            key,
+            "CS value length>16",
+            value.Value
+          );
+        }
+        value.Value[0] = value.Value[0].substring(0, 16);
+      }
+      if (key === "7FE00010") {
+        console.warn("importing pixel data", value);
+        continue;
+      }
+      if (value.BulkDataURI) {
+        console.warn("Importing BulkDataURI", value);
+      }
+    }
+    return fmi;
   }
 }
