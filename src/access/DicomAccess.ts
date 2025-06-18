@@ -401,7 +401,10 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
         continue;
       }
       if (!value.vr) {
-        value.vr = "UN";
+        console.warn("Need to figure out representation of", key, value);
+        // value.vr = getVr(key, value);
+        delete json[key];
+        continue;
       }
       if (value.vr === "CS" && value.Value?.[0]?.length > 16) {
         if (value.Value[0].length !== 17 || value.Value[0][16] !== "\\") {
@@ -416,10 +419,16 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
       }
       if (key === "7FE00010") {
         console.warn("importing pixel data", value);
+        delete json[key];
         continue;
       }
       if (value.BulkDataURI) {
         console.warn("Importing BulkDataURI", value);
+        delete json[key];
+        continue;
+      }
+      if (!value.Value) {
+        value.Value = [];
       }
     }
     return fmi;

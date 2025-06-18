@@ -6,7 +6,7 @@
       "dependencies": {
         "commander": "^12.1.0",
         "crypto": "^1.0.1",
-        "dcmjs": "^0.29.5",
+        "dcmjs": "link:dcmjs",
         "dcmjs-dimse": "0.1.27",
         "dicomweb-client": "^0.11.2",
         "jsdom": "^26.1.0",
@@ -323,7 +323,7 @@
 
     "data-urls": ["data-urls@5.0.0", "", { "dependencies": { "whatwg-mimetype": "^4.0.0", "whatwg-url": "^14.0.0" } }, "sha512-ZYP5VBHshaDAiVZxjbRVcFJpc+4xGgT0bK3vzy1HLN8jTO975HEbuYzZJcHoQEY5K1a0z8YayJkyVETa08eNTg=="],
 
-    "dcmjs": ["dcmjs@0.29.13", "", { "dependencies": { "@babel/runtime-corejs3": "^7.22.5", "adm-zip": "^0.5.10", "gl-matrix": "^3.1.0", "lodash.clonedeep": "^4.5.0", "loglevelnext": "^3.0.1", "ndarray": "^1.0.19", "pako": "^2.0.4" } }, "sha512-Bf9tKzJNWqk4kbV210N5TLEHDqaZvO3S+MH9vezFAU8WKcG4cR6z4/II3TQVqhLI185eNUL+lhfPCVH1Uu2yTA=="],
+    "dcmjs": ["dcmjs@link:dcmjs", {}],
 
     "dcmjs-dimse": ["dcmjs-dimse@0.1.27", "", { "dependencies": { "async-eventemitter": "^0.2.4", "dcmjs": "^0.30.3", "smart-buffer": "^4.2.0", "ts-mixer": "^6.0.4", "winston": "^3.12.0" } }, "sha512-d5XXXXm/uwZAVVDNWgJDMSDa5MXZ5GLapv0zd4qBWTMMzD5ALES2l8t8P5qg6GV+5pfojmmnE/2idB7pZHo54g=="],
 
