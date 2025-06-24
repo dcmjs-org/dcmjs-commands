@@ -5,7 +5,7 @@ import { finished } from "stream/promises";
 import { getBulkdataInfo } from "../utils/getBulkdataInfo";
 import dcmjs from "dcmjs";
 
-const { DicomDict } = dcmjs.data;
+const { DicomDict, WriteBufferStream, DicomMessage } = dcmjs.data;
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
 export class StaticDicomWebInstance extends InstanceAccess {
@@ -35,11 +35,20 @@ export class StaticDicomWebInstance extends InstanceAccess {
     console.warn("******** Storing part 10", this.uid);
     const fmi = await source.importBulkdata(json, options);
     console.warn("Generate fmi=", fmi);
-    console.warn("Converting to binary", json);
+    // console.warn("Converting to binary", json);
     const dicomDict = new DicomDict(fmi);
     dicomDict.dict = json;
-    const part10Buffer = dicomDict.write();
-    const dicomOut = await writeStream(this.url, "part10.dcm");
+    // const stream = new WriteBufferStream(1024);
+    // const bytesWritten = DicomMessage.write(
+    //   json,
+    //   stream,
+    //   "1.2.840.10008.1.2.4.50" // JPEG baseline (an encapsulated format)
+    // );
+
+    // console.warn("Got buffer", bytesWritten, stream.buffer.length);
+    // const part10Buffer = stream.buffer.slice(0, bytesWritten);
+    const part10Buffer = dicomDict.write(dicomDict);
+    const dicomOut = await writeStream(this.url, "part10.dcm", { mkdir: true });
     await dicomOut.writeWithPromise(part10Buffer);
     await dicomOut.close();
   }

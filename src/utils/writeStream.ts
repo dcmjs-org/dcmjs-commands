@@ -47,6 +47,9 @@ export const writeStream = async (dir, nameSrc, options?) => {
     if (!chunk) {
       throw new Error("Can't write with promise because chunk isn't defined");
     }
+    if (chunk instanceof ArrayBuffer) {
+      chunk = new Uint8Array(chunk);
+    }
     return new Promise((resolve, reject) => {
       const canWrite = this.write(chunk, null, (err) => {
         if (err) reject(err);

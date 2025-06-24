@@ -1,6 +1,7 @@
-import { logger, naturalize, denaturalize } from "../utils";
+import { logger, naturalize, fixValue, getVr } from "../utils";
 import type { JsonData, StudyNatural, SeriesNatural } from "./DicomWebTypes";
 import { selectSeries, selectInstance } from "./DicomWebTypes";
+
 const log = logger.commandsLog.getLogger("DicomAccess");
 const { dicomIssueLog } = logger;
 
@@ -400,11 +401,9 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
         }
         continue;
       }
-      if (!value.vr) {
-        console.warn("Need to figure out representation of", key, value);
-        // value.vr = getVr(key, value);
-        delete json[key];
-        continue;
+      fixValue(value);
+      if (!value.vr || value.vr === "UN") {
+        value.vr = getVr(key, value);
       }
       if (value.vr === "CS" && value.Value?.[0]?.length > 16) {
         if (value.Value[0].length !== 17 || value.Value[0][16] !== "\\") {
@@ -417,9 +416,18 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
         }
         value.Value[0] = value.Value[0].substring(0, 16);
       }
+
       if (key === "7FE00010") {
-        console.warn("importing pixel data", value);
-        delete json[key];
+        // Pixel Data
+        console.warn("Found pixel data", value);
+        value.Value = [new Uint8Array([1, 2, 3]).buffer];
+        value.vr = "OB";
+        console.warn("After update", value);
+
+        fmi["00020010"] = {
+          vr: "UI",
+          Value: ["1.2.840.10008.1.2.4.80"],
+        };
         continue;
       }
       if (value.BulkDataURI) {

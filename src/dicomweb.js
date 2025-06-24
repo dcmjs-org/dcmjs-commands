@@ -1,11 +1,8 @@
 import zlib from "zlib";
 import fs from "fs";
-import dcmjs from "dcmjs";
 
 import { httprequest } from "./webRetrieve.js";
 import { logger } from "./utils/index.js";
-
-const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
 
 const log = logger.commandsLog;
 
