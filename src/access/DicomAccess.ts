@@ -1,4 +1,5 @@
 import { logger, naturalize, fixValue, getVr } from "../utils";
+import { DicomWebInstance } from "./DicomWebInstance";
 import type { JsonData, StudyNatural, SeriesNatural } from "./DicomWebTypes";
 import { selectSeries, selectInstance } from "./DicomWebTypes";
 
@@ -371,6 +372,10 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
     return [];
   }
 
+  public async openFrame(frame = 1, _options?) {
+    throw new Error("Unsupported operation: openFrame");
+  }
+
   public createAccess(sopUID, natural?) {
     return null;
   }
@@ -420,14 +425,7 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
       if (key === "7FE00010") {
         // Pixel Data
         console.warn("Found pixel data", value);
-        value.Value = [new Uint8Array([1, 2, 3]).buffer];
-        value.vr = "OB";
-        console.warn("After update", value);
-
-        fmi["00020010"] = {
-          vr: "UI",
-          Value: ["1.2.840.10008.1.2.4.80"],
-        };
+        await this.fillFrames(json, key, value, fmi);
         continue;
       }
       if (value.BulkDataURI) {
@@ -440,5 +438,30 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
       }
     }
     return fmi;
+  }
+
+  public async fillFrames(json, key, value, fmi) {
+    // TODO - read actual number of frames
+    const numberOfFrames = 1;
+    value.vr = "OB";
+
+    value.Value = [];
+    let useTransferSyntax = fmi["00020010"].Value[0];
+    for (let frame = 1; frame <= numberOfFrames; frame++) {
+      const { buffer, transferSyntaxUID } = await this.openFrame(frame, {
+        buffer: true,
+      });
+      if (!buffer) {
+        throw new Error("Unable to read pixel data");
+      }
+      value.Value.push(buffer);
+      useTransferSyntax = transferSyntaxUID || useTransferSyntax;
+    }
+    console.warn("After update", value);
+
+    fmi["00020010"] = {
+      vr: "UI",
+      Value: [useTransferSyntax],
+    };
   }
 }

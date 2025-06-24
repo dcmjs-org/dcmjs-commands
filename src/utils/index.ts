@@ -7,3 +7,4 @@ export * from "./naturalize";
 export * from "./writeStream";
 export * from "./getVr";
 export * from "./fixValue";
+export * from "./streamToBuffer";

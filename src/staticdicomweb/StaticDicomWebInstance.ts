@@ -1,4 +1,4 @@
-import { writeStream, logger } from "../utils";
+import { writeStream, logger, frameToBuffer } from "../utils";
 import { InstanceAccess } from "../access/DicomAccess";
 import fsBase from "fs";
 import { finished } from "stream/promises";
@@ -129,7 +129,10 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   /** Opens the frame.  Options allow choosing to get compressed/encapsulated data back */
-  public async openFrame(frame = 1, _options?) {
+  public async openFrame(frame = 1, options?: { buffer?: boolean }) {
+    if (options?.buffer) {
+      return frameToBuffer(await this.openFrame(frame));
+    }
     const path = `${this.url}/frames/${frame}.mht`;
     if (fsBase.existsSync(path)) {
       log.debug("Getting uncompressed but encapsulated");
