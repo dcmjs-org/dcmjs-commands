@@ -32,9 +32,8 @@ export class StaticDicomWebInstance extends InstanceAccess {
 
   public async storePart10(source, options) {
     const json = structuredClone(source.jsonData);
-    console.warn("******** Storing part 10", this.uid);
+    console.warn("Storing part 10", this.uid);
     const fmi = await source.importBulkdata(json, options);
-    console.warn("Generate fmi=", fmi);
     // console.warn("Converting to binary", json);
     const dicomDict = new DicomDict(fmi);
     dicomDict.dict = json;
@@ -88,7 +87,11 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   public async storeBulkdataItem(key, source, child) {
-    const bulkdata = await source.openBulkdata(key, child);
+    const { buffer: bulkdata, encapsulated } = await source.openBulkdata(
+      key,
+      child,
+      { asBuffer: true }
+    );
     if (!bulkdata) {
       throw new Error(`Unable to read bulkdata ${key} from source ${source}`);
     }
@@ -107,7 +110,16 @@ export class StaticDicomWebInstance extends InstanceAccess {
       mkdir: true,
     });
     log.info("Storing bulkdata item", bulkdataSeriesName, bulkdata.length);
+    const boundary = crypto.randomUUID();
+    if (!encapsulated) {
+      await destBulkdata.writeWithPromise(
+        `--${boundary}\r\nContent-Type: ${contentType};transfer-syntax=${transferSyntaxUID}\r\n\r\n`
+      );
+    }
     await destBulkdata.writeWithPromise(new Uint8Array(bulkdata));
+    if (!encapsulated) {
+      await destBulkdata.writeWithPromise(`\r\n--${boundary}--`);
+    } 
     await destBulkdata.close();
 
     // Use the series name as all the paths are series relative

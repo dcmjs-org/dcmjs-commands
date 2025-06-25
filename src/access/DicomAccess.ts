@@ -1,5 +1,4 @@
-import { logger, naturalize, fixValue, getVr } from "../utils";
-import { DicomWebInstance } from "./DicomWebInstance";
+import { logger, naturalize, fixValue, getVr, getValue } from "../utils";
 import type { JsonData, StudyNatural, SeriesNatural } from "./DicomWebTypes";
 import { selectSeries, selectInstance } from "./DicomWebTypes";
 
@@ -380,9 +379,8 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
     return null;
   }
 
-  public openBulkdata(jsonNode) {
-    log.warn("Open bulkdata not implemented");
-    return null;
+  public openBulkdata(_tag, _jsonNode, _options) {
+    throw new Error("Open bulkdata not implemented");
   }
 
   /** Returns the json data for the current series query */
@@ -429,8 +427,7 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
         continue;
       }
       if (value.BulkDataURI) {
-        console.warn("Importing BulkDataURI", value);
-        delete json[key];
+        await this.readBulkdata(json, key, value, fmi);
         continue;
       }
       if (!value.Value) {
@@ -441,12 +438,11 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
   }
 
   public async fillFrames(json, key, value, fmi) {
-    // TODO - read actual number of frames
-    const numberOfFrames = 1;
+    const numberOfFrames = getValue(json, "00280008") || 1;
     value.vr = "OB";
 
     value.Value = [];
-    let useTransferSyntax = fmi["00020010"].Value[0];
+    let useTransferSyntax = getValue(fmi, "00020010");
     for (let frame = 1; frame <= numberOfFrames; frame++) {
       const { buffer, transferSyntaxUID } = await this.openFrame(frame, {
         buffer: true,
@@ -462,5 +458,10 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
       vr: "UI",
       Value: [useTransferSyntax],
     };
+  }
+
+  public async readBulkdata(json, key, value, fmi) {
+    const { buffer } = await this.openBulkdata(key, value, { asBuffer: true });
+    value.Value = buffer;
   }
 }
