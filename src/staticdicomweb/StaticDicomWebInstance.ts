@@ -5,7 +5,7 @@ import { finished } from "stream/promises";
 import { getBulkdataInfo } from "../utils/getBulkdataInfo";
 import dcmjs from "dcmjs";
 
-const { DicomDict, WriteBufferStream, DicomMessage } = dcmjs.data;
+const { DicomDict } = dcmjs.data;
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
 export class StaticDicomWebInstance extends InstanceAccess {
@@ -47,7 +47,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
 
     // console.warn("Got buffer", bytesWritten, stream.buffer.length);
     // const part10Buffer = stream.buffer.slice(0, bytesWritten);
-    const part10Buffer = dicomDict.write(dicomDict);
+    const part10Buffer = dicomDict.write({ fragmentMultiframe: false });
     const dicomOut = await writeStream(this.url, "part10.dcm", { mkdir: true });
     await dicomOut.writeWithPromise(part10Buffer);
     await dicomOut.close();

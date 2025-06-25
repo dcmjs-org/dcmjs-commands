@@ -457,7 +457,6 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
       value.Value.push(buffer);
       useTransferSyntax = transferSyntaxUID || useTransferSyntax;
     }
-    console.warn("After update", value);
 
     fmi["00020010"] = {
       vr: "UI",

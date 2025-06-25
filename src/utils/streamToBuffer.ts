@@ -1,16 +1,21 @@
-import { createReadStream } from "node:fs";
+import { multipartDecode } from "./message";
 import { once } from "node:events";
+import { Readable } from "node:stream";
 
 export async function frameToBuffer(readable) {
-  if( readable.buffer ) {
+  if (readable.buffer) {
     return readable;
   }
-  throw new Error("TODO - implement this");
-  // TODO - read buffer and tsuid here
+
+  const multipart = await streamToUint8Array(readable.stream);
+  const decoded = multipartDecode(multipart);
+  const [dataview] = decoded;
+  console.warn("Decoded", dataview.length, dataview.transferSyntaxUID);
   return {
-    buffer: new Uint8Array([1,2,3]).buffer,
-    transferSyntaxUID: "1.2.10008.1.2.4.80",
-  }
+    buffer: dataview.buffer,
+    transferSyntaxUID: dataview.transferSyntaxUID,
+    isEncapsulated: false,
+  };
 }
 
 /**
@@ -18,28 +23,29 @@ export async function frameToBuffer(readable) {
  * @param {NodeJS.ReadableStream} readable  An fs.createReadStream(...) or any Readable.
  * @returns {Promise<Uint8Array>}
  */
-export async function streamToUint8Array(readable) {
+export async function streamToUint8Array(source) {
   const chunks = [];
 
-  // Accumulate each Buffer chunk
-  readable.on("data", (chunk) => chunks.push(chunk));
+  // Case 1: Async iterable (Promises API)
+  if (typeof source[Symbol.asyncIterator] === "function") {
+    for await (const chunk of source) {
+      chunks.push(chunk);
+    }
 
-  // Wait for the stream to finish (or error)
-  await Promise.race([
-    once(readable, "end"),
-    once(readable, "error").then(([err]) => {
-      throw err;
-    }),
-  ]);
+    // Case 2: Node Readable stream (EventEmitter-style)
+  } else if (source instanceof Readable || typeof source.on === "function") {
+    source.on("data", (chunk) => chunks.push(chunk));
 
-  // Concatenate into a single Buffer first (fast native code)
+    await Promise.race([
+      once(source, "end"),
+      once(source, "error").then(([err]) => {
+        throw err;
+      }),
+    ]);
+  } else {
+    throw new TypeError("Unsupported stream type");
+  }
+
   const buf = Buffer.concat(chunks);
-
-  // Re-expose the same bytes as Uint8Array *without* copying
-  return new Uint8Array(
-    buf.buffer, // underlying ArrayBuffer
-    buf.byteOffset, // start of data
-    buf.byteLength // number of bytes
-  );
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
-
