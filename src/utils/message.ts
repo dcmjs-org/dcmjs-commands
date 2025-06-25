@@ -254,13 +254,13 @@ function multipartDecode(response) {
   const separator = stringToUint8Array("\r\n\r\n");
   const headerIndex = findToken(message, separator, 0, maxSearchLength);
   if (headerIndex === -1) {
-    throw new Error("Response message has no multipart mime header");
+    return null;
   }
 
   const header = uint8ArrayToString(message, 0, headerIndex);
   const boundaryString = identifyBoundary(header);
   if (!boundaryString) {
-    throw new Error("Header of response message does not specify boundary");
+    return null;
   }
 
   const boundary = stringToUint8Array(boundaryString);

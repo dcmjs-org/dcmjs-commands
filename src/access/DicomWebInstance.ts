@@ -1,12 +1,12 @@
 import { logger } from "../utils";
 import { InstanceAccess } from "../access/DicomAccess";
+import { multipartDecode } from "../utils/message";
 
 const log = logger.commandsLog.getLogger("DicomWeb", "Instance");
 
 export class DicomWebInstance extends InstanceAccess {
   /** Opens the frame.  Options allow choosing to get compressed/encapsulated data back */
   public async openFrame(frame = 1, _options?) {
-    console.warn("Opening frame", frame, "of", `${this.url}/frames/${frame}`);
     const frames = await this.dicomAccess.client.retrieveInstanceFrames({
       ..._options,
       studyInstanceUID: this.parent.parent.uid,
@@ -33,6 +33,14 @@ export class DicomWebInstance extends InstanceAccess {
       studyInstanceUID: this.parent.parent.uid,
       BulkDataURI: bulkDataURI,
     });
+    const decoded = multipartDecode(bulk[0]);
+    if (decoded) {
+      return {
+        buffer: decoded[0],
+        encapsulated: false,
+        compressed: false,
+      };
+    }
     return {
       buffer: bulk[0],
       encapsulated: false,

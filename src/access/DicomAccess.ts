@@ -422,7 +422,6 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
 
       if (key === "7FE00010") {
         // Pixel Data
-        console.warn("Found pixel data", value);
         await this.fillFrames(json, key, value, fmi);
         continue;
       }
@@ -461,7 +460,7 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
   }
 
   public async readBulkdata(json, key, value, fmi) {
-    const { buffer } = await this.openBulkdata(key, value, { asBuffer: true });
-    value.Value = buffer;
+    const bulkdata = await this.openBulkdata(key, value, { asBuffer: true });
+    value.Value = [bulkdata.buffer];
   }
 }
