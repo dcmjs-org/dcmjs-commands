@@ -1,18 +1,26 @@
-#!/usr/bin/env node
-import { Command } from 'commander';
-import { dicomweb, instanceDicom, dumpDicom } from '../src/index.js';
+#!/usr/bin/env bun
+import { Command } from "commander";
+import { dicomweb, instanceDicom, dumpDicom } from "../src/index.js";
+import cliDownload from "./cliDownload.js";
 
 const program = new Command();
 
-program
-  .name('dicomwebjs')
-  .description('dicomwebjs based tools for manipulation of DICOMweb')
-  .version('0.0.1')
-  .option('--seriesUID <seriesUID>', 'For a specific seriesUID');
+program.option(
+  "-s, --study <studyInstanceUID>",
+  "Download a specific study instance UID"
+);
 
-program.command('dump')
-  .description('Dump a dicomweb file')
-  .argument('<dicomwebUrl>', 'dicomweb URL or file location')
+program
+  .name("dicomwebjs")
+  .description("dicomwebjs based tools for manipulation of DICOMweb")
+  .version("0.0.1")
+  .option("--seriesUID <seriesUID>", "For a specific seriesUID");
+
+program
+  .command("dump")
+  .description("Dump a dicomweb file")
+  .argument("<dicomwebUrl>", "dicomweb URL or file location")
+  .option("--debug", "Set debug level logging")
   .action(async (fileName, options) => {
     const qido = await dicomweb.readDicomWeb(fileName, options);
     for (const dict of qido) {
@@ -20,16 +28,19 @@ program.command('dump')
     }
   });
 
-program.command('instance')
-  .description('Write the instance data')
-  .argument('<part10>', 'part 10 file')
-  .option('-p, --pretty', 'Pretty print')
+program
+  .command("instance")
+  .description("Write the instance data")
+  .argument("<part10>", "part 10 file")
+  .option("-p, --pretty", "Pretty print")
+  .option("--debug", "Set debug level logging")
   .action(async (fileName, options) => {
     const qido = await dicomweb.readDicomWeb(fileName, options);
     for (const dict of qido) {
       instanceDicom({ dict }, options);
     }
-  })
+  });
 
+cliDownload(program);
 
 program.parse();
