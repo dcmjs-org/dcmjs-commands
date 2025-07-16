@@ -1,6 +1,9 @@
 import dcmjs from "dcmjs";
 
 export function naturalize(json) {
+  if (!json) {
+    throw new Error("json entry is null");
+  }
   if (Array.isArray(json)) {
     return json.map(naturalize);
   }

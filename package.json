@@ -52,9 +52,9 @@
   "dependencies": {
     "commander": "^12.1.0",
     "crypto": "^1.0.1",
-    "dcmjs": "^0.29.5",
+    "dcmjs": "^0.41.0",
     "dcmjs-dimse": "0.1.27",
-    "dicomweb-client": "0.11.2",
+    "dicomweb-client": "^0.11.2",
     "jsdom": "^26.1.0",
     "loglevel": "^1.9.2",
     "zlib": "^1.0.5"

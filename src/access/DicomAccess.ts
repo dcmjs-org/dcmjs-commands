@@ -1,12 +1,40 @@
-import { logger, naturalize, denaturalize } from "../utils";
+import { logger, naturalize, fixValue, getVr, getValue } from "../utils";
 import type { JsonData, StudyNatural, SeriesNatural } from "./DicomWebTypes";
 import { selectSeries, selectInstance } from "./DicomWebTypes";
+
 const log = logger.commandsLog.getLogger("DicomAccess");
+const { dicomIssueLog } = logger;
 
 // Abstract base class for DICOM access implementations
 export abstract class DicomAccess {
   public static readonly childInfo = {
     childUid: "StudyInstanceUID",
+  };
+
+  public static DICOMWEB_OPTIONS = {
+    singleStudy: true,
+    singleSeries: true,
+    part10: false,
+    seriesMetadata: true,
+    frames: true,
+    rendered: false,
+    thumbnail: false,
+    studyMetadata: false,
+    instanceMetadata: false,
+    bulkdata: true,
+  };
+
+  public static PART10_OPTIONS = {
+    singleStudy: false,
+    singleSeries: false,
+    part10: true,
+    seriesMetadata: false,
+    frames: false,
+    rendered: false,
+    thumbnail: false,
+    studyMetadata: false,
+    instanceMetadata: false,
+    bulkdata: false,
   };
 
   public readonly url: string;
@@ -67,9 +95,9 @@ export abstract class DicomAccess {
     return study;
   }
 
-  public store(study: StudyAccess): Promise<StudyAccess> {
+  public store(study: StudyAccess, options): Promise<StudyAccess> {
     const studyDestination = this.add(study.studyUID);
-    return studyDestination.store(study);
+    return studyDestination.store(study, options);
   }
 
   public abstract createAccess(studyUID: string): StudyAccess;
@@ -168,7 +196,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
   /**
    * Store data at hte current level and children levels (if any)
    */
-  public async store(source) {
+  public async store(source, options) {
     log.info(
       "Storing source",
       this.name,
@@ -185,7 +213,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
           `Unable to create ${childSource.name} ${childSource.uid}`
         );
       }
-      await destChild.store(childSource);
+      await destChild.store(childSource, options);
     });
     log.info(
       "Finished storing children for",
@@ -194,7 +222,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
       this.childrenMap.size,
       source.childrenMap.size
     );
-    await this.storeCurrentLevel(source);
+    await this.storeCurrentLevel(source, options);
     return this;
   }
 
@@ -209,7 +237,7 @@ export abstract class ChildType<ParentT, ChildT, NaturalT> {
   public abstract queryChildren(): Promise<ChildT[]>;
   public abstract createAccess(uid: string, natural?: NaturalT);
 
-  public storeCurrentLevel(source) {
+  public storeCurrentLevel(_source, _options) {
     console.warn("Storing current level", this.name, "is unimplemented");
   }
 
@@ -343,17 +371,96 @@ export class InstanceAccess extends ChildType<SeriesAccess, object, object> {
     return [];
   }
 
+  public async openFrame(frame = 1, _options?) {
+    throw new Error("Unsupported operation: openFrame");
+  }
+
   public createAccess(sopUID, natural?) {
     return null;
   }
 
-  public openBulkdata(jsonNode) {
-    log.warn("Open bulkdata not implemented");
-    return null;
+  public openBulkdata(_tag, _jsonNode, _options) {
+    throw new Error("Open bulkdata not implemented");
   }
 
   /** Returns the json data for the current series query */
   public createInstanceQuery() {
     return selectInstance(this.getNatural());
+  }
+
+  /**
+   * Imports BulkDataURI and frame data into the json object.
+   */
+  public async importBulkdata(json, options, fmi?) {
+    if (!fmi) {
+      fmi = {
+        "00020010": { vr: "UI", Value: ["1.2.840.10008.1.2.1"] },
+      };
+    }
+    for (const [key, value] of Object.entries(json)) {
+      if (value.vr === "SQ" && value.Value) {
+        for (const child of value.Value) {
+          this.importBulkdata(child, options, fmi);
+        }
+        continue;
+      }
+      fixValue(value);
+      if (!value.vr || value.vr === "UN") {
+        value.vr = getVr(key, value);
+      }
+      if (value.vr === "CS" && value.Value?.[0]?.length > 16) {
+        if (value.Value[0].length !== 17 || value.Value[0][16] !== "\\") {
+          dicomIssueLog.warn(
+            "Invalid tag",
+            key,
+            "CS value length>16",
+            value.Value
+          );
+        }
+        value.Value[0] = value.Value[0].substring(0, 16);
+      }
+
+      if (key === "7FE00010") {
+        // Pixel Data
+        await this.fillFrames(json, key, value, fmi);
+        continue;
+      }
+      if (value.BulkDataURI) {
+        await this.readBulkdata(json, key, value, fmi);
+        continue;
+      }
+      if (!value.Value) {
+        value.Value = [];
+      }
+    }
+    return fmi;
+  }
+
+  public async fillFrames(json, key, value, fmi) {
+    const numberOfFrames = getValue(json, "00280008") || 1;
+    value.vr = "OB";
+
+    value.Value = [];
+    let useTransferSyntax = getValue(fmi, "00020010");
+    for (let frame = 1; frame <= numberOfFrames; frame++) {
+      const { buffer, transferSyntaxUID } = await this.openFrame(frame, {
+        buffer: true,
+      });
+      if (!buffer) {
+        throw new Error("Unable to read pixel data");
+      }
+      value.Value.push(buffer);
+      useTransferSyntax = transferSyntaxUID || useTransferSyntax;
+    }
+
+    fmi["00020010"] = {
+      vr: "UI",
+      Value: [useTransferSyntax],
+    };
+  }
+
+  public async readBulkdata(json, key, value, fmi) {
+    const bulkdata = await this.openBulkdata(key, value, { asBuffer: true });
+    value.Value = [bulkdata.buffer];
   }
 }

@@ -1,13 +1,15 @@
-import { writeStream, logger } from "../utils";
+import { writeStream, logger, frameToBuffer } from "../utils";
 import { InstanceAccess } from "../access/DicomAccess";
 import fsBase from "fs";
 import { finished } from "stream/promises";
 import { getBulkdataInfo } from "../utils/getBulkdataInfo";
+import dcmjs from "dcmjs";
 
+const { DicomDict } = dcmjs.data;
 const log = logger.commandsLog.getLogger("StaticDicomWeb", "Series");
 
 export class StaticDicomWebInstance extends InstanceAccess {
-  public async storeCurrentLevel(source: InstanceAccess): void {
+  public async storeCurrentLevel(source: InstanceAccess, options): void {
     if (!source.jsonData) {
       throw new Error(`No json data for instance ${source.uid}`);
     }
@@ -15,9 +17,39 @@ export class StaticDicomWebInstance extends InstanceAccess {
 
     this.jsonData = structuredClone(source.jsonData);
 
-    await this.storeBulkdata(source);
+    if (options?.bulkdata !== false) {
+      await this.storeBulkdata(source);
+    }
 
-    await this.storeFrames(source);
+    if (options?.frames !== false) {
+      await this.storeFrames(source);
+    }
+
+    if (options?.part10) {
+      await this.storePart10(source, options);
+    }
+  }
+
+  public async storePart10(source, options) {
+    const json = structuredClone(source.jsonData);
+    console.warn("Storing part 10", this.uid);
+    const fmi = await source.importBulkdata(json, options);
+    // console.warn("Converting to binary", json);
+    const dicomDict = new DicomDict(fmi);
+    dicomDict.dict = json;
+    // const stream = new WriteBufferStream(1024);
+    // const bytesWritten = DicomMessage.write(
+    //   json,
+    //   stream,
+    //   "1.2.840.10008.1.2.4.50" // JPEG baseline (an encapsulated format)
+    // );
+
+    // console.warn("Got buffer", bytesWritten, stream.buffer.length);
+    // const part10Buffer = stream.buffer.slice(0, bytesWritten);
+    const part10Buffer = dicomDict.write({ fragmentMultiframe: false });
+    const dicomOut = await writeStream(this.url, "part10.dcm", { mkdir: true });
+    await dicomOut.writeWithPromise(part10Buffer);
+    await dicomOut.close();
   }
 
   /**
@@ -55,7 +87,11 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   public async storeBulkdataItem(key, source, child) {
-    const bulkdata = await source.openBulkdata(key, child);
+    const { buffer: bulkdata, encapsulated } = await source.openBulkdata(
+      key,
+      child,
+      { asBuffer: true }
+    );
     if (!bulkdata) {
       throw new Error(`Unable to read bulkdata ${key} from source ${source}`);
     }
@@ -74,7 +110,16 @@ export class StaticDicomWebInstance extends InstanceAccess {
       mkdir: true,
     });
     log.info("Storing bulkdata item", bulkdataSeriesName, bulkdata.length);
+    const boundary = crypto.randomUUID();
+    if (!encapsulated) {
+      await destBulkdata.writeWithPromise(
+        `--${boundary}\r\nContent-Type: ${contentType};transfer-syntax=${transferSyntaxUID}\r\n\r\n`
+      );
+    }
     await destBulkdata.writeWithPromise(new Uint8Array(bulkdata));
+    if (!encapsulated) {
+      await destBulkdata.writeWithPromise(`\r\n--${boundary}--`);
+    } 
     await destBulkdata.close();
 
     // Use the series name as all the paths are series relative
@@ -96,7 +141,10 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   /** Opens the frame.  Options allow choosing to get compressed/encapsulated data back */
-  public async openFrame(frame = 1, _options?) {
+  public async openFrame(frame = 1, options?: { buffer?: boolean }) {
+    if (options?.buffer) {
+      return frameToBuffer(await this.openFrame(frame));
+    }
     const path = `${this.url}/frames/${frame}.mht`;
     if (fsBase.existsSync(path)) {
       log.debug("Getting uncompressed but encapsulated");

@@ -24,12 +24,12 @@ const action = async (url, options) => {
     const srcStudy = await access.queryStudy(studyUID);
 
     await destination.store(srcStudy, {
-      ...DicomAccess.DICOMWEB_OPTIONS,
-      options,
+      ...DicomAccess.PART10_OPTIONS,
+      ...options,
     });
 
     console.log(
-      `🎉 Download complete. Study saved to: ${options.directory}/studies/${studyUID}`
+      `🎉 Part 10 conversion complete. Study saved to: ${options.directory}/studies/${studyUID}`
     );
   } catch (err) {
     console.warn("❌ An error occurred during download:", err);
@@ -42,8 +42,8 @@ const action = async (url, options) => {
 // CLI registration
 export default async function cliDownload(program) {
   program
-    .command("download")
-    .description("Download a full DICOM study from any supported source")
+    .command("part10")
+    .description("Convert local or remote DICOMweb metadata files to part 10")
     .argument("<url>", "DICOMweb URL or local path (e.g. ./study, scp://...)")
     .option(
       "-S, --StudyInstanceUID <StudyInstanceUID>",
