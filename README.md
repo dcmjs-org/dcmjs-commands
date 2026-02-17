@@ -35,10 +35,18 @@ dicomwebjs dump testdata/studies/1.2.276.1.74.1.2.132733202464108492637644434464
 dicomwebjs can be used to download a directory of file locations. By default it will fetch everything at and below the specified URL, plus referenced bulkdata. Bulkdata will be
 placed in the `studies/<studyUID>/bulkdata` directory, with metadata references to the bulkdata using the `../../bulkdata/<path>` relative URI locations.
 
+## part10 `url` --StudyInstanceUID=studyUID
+
+dicomwebjs can be used to download part10 files from remote dicomweb servers in the static wado format.
+
 ### Example Commands
 
 ```
 dicomwebjs download https://d33do7qe4w26qo.cloudfront.net/dicomweb/studies/1.3.6.1.4.1.14519.5.2.1.4792.2001.105216574054253895819671475627 -d ~/dicomweb
+```
+
+```
+dicomwebjs part10  https://d14fa38qiwhyfd.cloudfront.net/dicomweb --StudyInstanceUID=1.2.840.113619.2.290.3.3767434740.838.1526468636.966 -d ./downloads
 ```
 
 ### File Locations
