@@ -52,7 +52,7 @@
   "dependencies": {
     "commander": "^12.1.0",
     "crypto": "^1.0.1",
-    "dcmjs": "^0.41.0",
+    "dcmjs": "^0.47.1",
     "dcmjs-dimse": "0.1.27",
     "dicomweb-client": "^0.11.2",
     "jsdom": "^26.1.0",
@@ -84,6 +84,7 @@
     "build": "bun build src/index.js --format esm --target node --outdir dist --",
     "clean": "rimraf dist",
     "dicomwebjs": "bun run build && bun run bin/dicomwebjs.js --",
+    "dcmjs": "bun run build && bun run bin/dcmjs.js --",
     "link:exec": "npm install -g && npm link",
     "lint": "npx eslint --color \"**/*.{js,mjs,cjs}\"",
     "lint:fix": "npx eslint --fix --color \"**/*.{js,mjs,cjs}\""

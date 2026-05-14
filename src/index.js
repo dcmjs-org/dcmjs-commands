@@ -22,6 +22,18 @@ export function dumpDicom(dicomDict, options = {}) {
   dumpData(dicomDict.dict, options);
 }
 
+export function naturalDicom(dicomDict, options = {}) {
+  if (dicomDict.meta) {
+    console.log("Metadata");
+    dumpData(dicomDict.meta, options);
+  }
+  console.log("Data");
+  const natural = dcmjs.data.DicomMetaDictionary.naturalizeDataset(
+    dicomDict.dict
+  );
+  console.log(JSON.stringify(natural, null, 2));
+}
+
 export function dumpData(data, options, indent = "") {
   if (typeof data !== "object") {
     return;
