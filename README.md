@@ -1,9 +1,9 @@
 # dcmjs-commands
 
 Command-line tools, built on [dcmjs](https://github.com/awatson1978/dcmjs),
-for working with medical imaging files — DICOM on disk (*Part 10* files,
+for working with medical imaging files — DICOM on disk (_Part 10_ files,
 the `.dcm` format scanners and PACS systems produce) and DICOM on the web
-(*DICOMweb*, the JSON-and-HTTP API for the same data).
+(_DICOMweb_, the JSON-and-HTTP API for the same data).
 
 What you can do with them:
 
@@ -19,19 +19,24 @@ What you can do with them:
   dry-run.
 - **Package and publish**: build DICOMDIR filesets for interchange media,
   or Static-DICOMweb trees that web viewers like OHIF read directly —
-  optionally with a FHIR layer (the *dicomweb+fhir* format) so FHIR
+  optionally with a FHIR layer (the _dicomweb+fhir_ format) so FHIR
   systems can discover the study too.
+- **Retrieve as a patient or on a patient's behalf**: `patient-access`
+  implements the Argonaut SMART Imaging Access flow — discover the imaging
+  server from a FHIR base, authorize via SMART App Launch, list the
+  patient's ImagingStudies, and pull the DICOM through the referenced
+  DICOMweb endpoint with the same token.
 - **Hand it to an AI agent**: every verb is also available as a typed MCP
   tool, with guardrails designed for machine callers.
 
 Four bins ship with the package:
 
-| Bin | Purpose |
-|-----|---------|
-| `dcmjs` | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb |
-| `dcmjs-mcp` | the same verbs as MCP tools over stdio, for LLM agents |
-| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10 |
-| `dimsejs` | DIMSE networking — **experimental stub, not implemented** |
+| Bin          | Purpose                                                                                                                                              |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb — plus patient-access (SMART Imaging Access retrieval) |
+| `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                               |
+| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                   |
+| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                            |
 
 For a worked tour of every command with runnable examples, see
 [EXAMPLES.md](EXAMPLES.md). For where the tooling is headed (library-level
@@ -40,19 +45,19 @@ APIs, pipeable CLI, SMART-context inputs), see
 
 ## Install
 
-Requires Node >= 22.13. Everything described in this README lives on the
-**`development` branch of both repositories** — clone with
-`-b development`, or check the branch out after cloning. The two
-repositories sit side by side: the `dcmjs` dependency here points at the
-sibling checkout `file:../dcmjs`, which must be built first:
+Requires Node >= 22.13. This branch (`feat/patient-access`, which contains
+the whole arc: the modernized CLI, the dcmjs 1.0 integration, and the
+patient-access command) builds against the **dcmjs 1.0-beta preview** — the
+merge of all ten open dcmjs assembly PRs. The `dcmjs` dependency points at a
+sibling checkout named `dcmjs-integration`, which must be built first:
 
 ```bash
-# this package and its sibling, side by side — note the branch
-git clone -b development https://github.com/awatson1978/dcmjs-commands.git
-git clone -b development https://github.com/awatson1978/dcmjs.git
+# this package and its dcmjs sibling, side by side — note the branch names
+git clone -b feat/patient-access https://github.com/awatson1978/dcmjs-commands.git
+git clone -b integration/1.0-beta-preview https://github.com/awatson1978/dcmjs.git dcmjs-integration
 
-# build the sibling first
-(cd dcmjs && pnpm install && pnpm run build)
+# build the sibling first (pnpm — it is a pnpm workspace)
+(cd dcmjs-integration && pnpm install && pnpm run build)
 
 # then install this package
 cd dcmjs-commands
@@ -172,7 +177,7 @@ NONCONFORMANT  scan.dcm  (1 error, 0 warnings)
     error  iod.type1.missing  Type 1 attribute Rows (00280010) of module image-pixel is missing
 ```
 
-Conformance *errors* exit 1; warnings and infos inform. Suppress rules
+Conformance _errors_ exit 1; warnings and infos inform. Suppress rules
 you've triaged with `--ignore <rule-id>` (repeatable). Files too large
 for eager parsing validate through the streaming engine — same rules,
 bounded memory. `--json` reports include each file's conformance
@@ -215,6 +220,33 @@ Patient; if it disagrees with the instance tags you get a warning (run
 `dcmjs filter --fhir-patient` first when the instances should match).
 `--fhir-encounter` embeds an Encounter and references it from
 `ImagingStudy.encounter`.
+
+### patient-access
+
+Retrieve a patient's imaging per the [Argonaut SMART Imaging Access
+IG](https://build.fhir.org/ig/argonautproject/smart-imaging/): SMART
+configuration discovery, App Launch (PKCE) authorization, an
+`ImagingStudy?patient=…&_include=ImagingStudy:endpoint` search, Endpoint
+resolution, and WADO-RS retrieval with the same Bearer token.
+
+```bash
+# list what is available (no download), against the Argonaut reference stack
+dcmjs patient-access --imaging-url https://imaging.argo.run/open/fhir \
+  --patient <fhir-patient-id> --token open --dry-run
+
+# pull one study as Part 10 files
+dcmjs patient-access --imaging-url <imaging-fhir-base> --patient <id> \
+  --token <bearer> --study-uid <StudyInstanceUID> -o ./out --format part10
+
+# interactive SMART App Launch (opens a loopback listener, prints the
+# authorization URL; --paste-code if the loopback cannot be reached)
+dcmjs patient-access --fhir-url <clinical-fhir-base> --client-id <id> \
+  --patient <id> -o ./out
+```
+
+See the `patient-access` section of [EXAMPLES.md](EXAMPLES.md) for a real
+transcript against the reference server, and `dcmjs patient-access --help`
+for the full flag set.
 
 ## dcmjs-mcp — MCP server for LLM toolchains
 
@@ -310,6 +342,6 @@ npm run format:check  # prettier
 ```
 
 Tests use the committed fixture `test/fixtures/sample-dicom.dcm` plus
-synthesized data — no network and no submodules. CI (GitHub Actions) checks
-out and builds the sibling dcmjs fork before running the suite on Node 22
-and 24.
+synthesized data — no network and no submodules. CI (GitHub Actions) checks out and builds the sibling dcmjs 1.0-beta
+preview (`awatson1978/dcmjs@integration/1.0-beta-preview`) before running
+the suite on Node 22 and 24.
