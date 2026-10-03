@@ -13,7 +13,7 @@ Four binaries:
 
 | binary | purpose |
 |---|---|
-| `dcmjs` | local Part 10 files: inspect, convert, validate, anonymize, filter, dicomdir, dicomweb |
+| `dcmjs` | local Part 10 files: inspect, convert, validate, anonymize, filter, dicomdir, dicomweb — plus patient-access (SMART Imaging Access retrieval) |
 | `dcmjs-mcp` | the same verbs as MCP tools for LLM toolchains (stdio server) |
 | `dicomwebjs` | DICOMweb sources (http or Static-DICOMWeb file trees): dump, instance, study transfer |
 | `dimsejs` | DIMSE networking (stub — placeholder surface) |
@@ -654,6 +654,92 @@ dicomwebjs download https://server/dicomweb -S 1.2.840.113619.2.5.1762583153... 
 
 # Pull a study back out as Part 10 .dcm files
 dicomwebjs part10 ./local-cache -S 1.2.840.113619.2.5.1762583153... -d ./exported
+```
+
+---
+
+## `dcmjs patient-access` — SMART Imaging Access
+
+The [SMART Imaging Access IG](https://build.fhir.org/ig/argonautproject/smart-imaging/)
+flow end to end: discover the imaging endpoint from the clinical FHIR
+server's `/.well-known/smart-configuration`, authorize via SMART App
+Launch (public client + PKCE, loopback redirect on
+`http://127.0.0.1:<port>/callback`), search
+`ImagingStudy?patient=...&_include=ImagingStudy:endpoint`, resolve each
+study's WADO-RS `Endpoint.address`, and retrieve with the same Bearer
+token — into a Static-DICOMweb tree (default) or Part 10 files
+(`--format part10`).
+
+```bash
+# See what's there before downloading anything: --dry-run lists studies
+# and their resolved WADO-RS endpoints. --token skips authorization —
+# for pre-authorized tokens, open test servers, or scripted flows.
+dcmjs patient-access \
+  --fhir-url https://imaging.example/fhir \
+  --token "$ACCESS_TOKEN" --patient pat123 \
+  --dry-run
+
+# The full interactive flow: prints the authorization URL (and tries to
+# open a browser), waits on the loopback, exchanges the code, searches,
+# downloads. --paste-code replaces the loopback when the browser can't
+# reach this machine (SSH session, container).
+dcmjs patient-access \
+  --fhir-url https://ehr.example/fhir \
+  --client-id my-registered-client --redirect-port 8765 \
+  --output ./patient-studies --format part10
+```
+
+A real transcript against the Argonaut reference stack's open
+(no-authorization) configuration at `https://imaging.argo.run/open/fhir`
+(run 2026-10-03; `--token dummy` because open mode ignores the
+Authorization header; NODE_TLS_REJECT_UNAUTHORIZED=0 was needed because
+the server's TLS certificate expired on 2026-09-23 — drop it once the
+cert is renewed):
+
+```bash
+dcmjs patient-access \
+  --fhir-url https://imaging.argo.run/open/fhir \
+  --token dummy --patient 87a339d0-8cae-418e-89c7-8651e6aab3c6 \
+  --study-uid 1.3.6.1.4.1.37476.9000.163.4311018110517522394140143231184931061 \
+  --output ./pa-e2e --format part10
+# patient-access: 1 study for patient 87a339d0-8cae-418e-89c7-8651e6aab3c6 at https://imaging.argo.run/open/fhir
+#   1.3.6.1.4.1.37476.9000.163.43110181105...  [Upper Extremity]  endpoint=https://imaging.argo.run/open/wado/eyJhbGciOiJkaXIiLCJlbm...
+# patient-access: study 1.3.6.1.4.1.37476.9000.163.43110181105... → ./pa-e2e/studies/1.3.6.1.4.1.37476.9000.163.43110181105...
+# patient-access: 1 study retrieved to ./pa-e2e (part10)
+
+dcmjs dump ./pa-e2e/studies/*/series/*/instances/*/part10.dcm | grep -E "Modality|PatientName|SeriesDescription"
+# (0008,0060) CS Modality: CR
+# (0008,103E) LO SeriesDescription: Wrist LAT
+# (0010,0010) PN PatientName: Lopez^Camila Maria^^^
+```
+
+Three CR instances (41 MB) came back over WADO-RS. Note two reference-server
+behaviors the command absorbs: its WADO endpoints are retrieve-only (no
+study-level QIDO — the source falls back to the study UID it already has),
+and it ignores the `identifier` search parameter (`--study-uid` narrows
+client-side as well).
+
+The authorized flow against the same stack pairs the SMART sandbox with
+the token-validating configuration — this one genuinely requires
+interactive authorization in a browser, so it is a recipe, not a
+transcript:
+
+```bash
+# 1. Register/choose a patient in the SMART App Launch sandbox
+#    (https://launch.smarthealthit.org, R4, Patient Standalone Launch,
+#    redirect http://127.0.0.1:8765/callback — the sandbox accepts any
+#    client id).
+# 2. Authorize against the sandbox; search and retrieve from the
+#    token-validating imaging server:
+dcmjs patient-access \
+  --fhir-url "https://launch.smarthealthit.org/v/r4/sim/<launch-config>/fhir" \
+  --imaging-url https://imaging.argo.run/smart-sandbox/fhir \
+  --client-id whatever --scope "launch/patient patient/ImagingStudy.rs" \
+  --output ./sandbox-studies
+# A browser opens on the sandbox's authorization screen; pick the patient
+# and approve. The loopback catches the redirect, the token (and its
+# patient launch context — no --patient needed) comes back, and the
+# imaging server validates that token before serving the studies.
 ```
 
 ---
