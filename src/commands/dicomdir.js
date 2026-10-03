@@ -201,7 +201,7 @@ export async function runDicomdir({ dcmjs, positionals, values, stdout, stderr }
           {
             output,
             summary,
-            entries: entries.map(({ sourcePath, ...entry }) => entry),
+            entries: entries.map(({ sourcePath: _sourcePath, ...entry }) => entry),
             warnings,
             skipped,
           },
