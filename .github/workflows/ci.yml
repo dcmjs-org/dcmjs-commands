@@ -16,13 +16,14 @@ jobs:
         with:
           path: dcmjs-commands
 
-      # The dcmjs dependency is file:../dcmjs — check out and build the
-      # sibling fork before npm ci can succeed.
+      # The dcmjs dependency is file:../dcmjs-integration — check out and
+      # build the sibling fork (the merged 1.0-beta preview) into that path
+      # before npm ci can succeed.
       - uses: actions/checkout@v4
         with:
           repository: awatson1978/dcmjs
-          ref: development
-          path: dcmjs
+          ref: integration/1.0-beta-preview
+          path: dcmjs-integration
 
       - uses: pnpm/action-setup@v4
         with:
@@ -35,7 +36,7 @@ jobs:
           cache-dependency-path: dcmjs-commands/package-lock.json
 
       - name: Build sibling dcmjs
-        working-directory: dcmjs
+        working-directory: dcmjs-integration
         run: |
           pnpm install --no-frozen-lockfile
           pnpm run build
