@@ -27,6 +27,9 @@ export class DicomWebAccess extends DicomAccess {
     log.debug("Creating DicomWebAccess for", url);
     this.client = new DICOMwebClient.api.DICOMwebClient({
       url,
+      // e.g. { Authorization: `Bearer ...` } — dicomweb-client adds these
+      // to every request (SMART Imaging Access reuses the FHIR token).
+      headers: options?.headers,
       verbose: false,
     });
     log.debug("Created DICOMwebclient api", !!this.client);

@@ -15,6 +15,10 @@ import { runValidate, validateUsage } from "./commands/validate.js";
 import { runFilter, filterUsage } from "./commands/filter.js";
 import { runDicomdir, dicomdirUsage } from "./commands/dicomdir.js";
 import { runDicomweb, dicomwebUsage } from "./commands/dicomweb.js";
+import {
+  runPatientAccess,
+  patientAccessUsage,
+} from "./commands/patientAccess.js";
 
 export const usage = `usage: dcmjs <command> [options]
 
@@ -27,6 +31,9 @@ Commands:
     validate    parse files/directories and report failures
     dicomdir    build a DICOMDIR indexing a directory of DICOM files
     dicomweb    publish a directory of DICOM files as a Static-DICOMweb tree
+    patient-access
+                fetch a patient's imaging studies via SMART Imaging Access
+                (FHIR discovery → App Launch → WADO-RS retrieval)
 
 Run 'dcmjs <command> --help' for command options.
 `;
@@ -128,6 +135,27 @@ const COMMANDS = {
       verbose: { type: "boolean", default: false },
       debug: { type: "boolean", default: false },
       quiet: { type: "boolean", default: false },
+      help: { type: "boolean", short: "h", default: false },
+    },
+  },
+  "patient-access": {
+    run: runPatientAccess,
+    usage: patientAccessUsage,
+    options: {
+      "fhir-url": { type: "string" },
+      "imaging-url": { type: "string" },
+      patient: { type: "string" },
+      token: { type: "string" },
+      "client-id": { type: "string" },
+      "redirect-port": { type: "string" },
+      "paste-code": { type: "boolean", default: false },
+      scope: { type: "string" },
+      "last-updated": { type: "string" },
+      "study-uid": { type: "string" },
+      output: { type: "string", short: "o" },
+      format: { type: "string" },
+      fhir: { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   },
