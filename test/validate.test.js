@@ -13,6 +13,15 @@ dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { runValidate } from "../src/commands/validate.js";
 
+// The conformance engine (dcmjs.validate + ValidationListener) is v2-only.
+// On 1.0-beta dcmjs it arrives later with @dcmjs-org/validator, so the
+// conformance tests skip there and the corrective-message test runs instead.
+const HAS_CONFORMANCE_ENGINE =
+  typeof dcmjs.validate === "function" &&
+  typeof dcmjs.validation?.ValidationListener === "function";
+const testConformance = HAS_CONFORMANCE_ENGINE ? test : test.skip;
+const testNoEngine = HAS_CONFORMANCE_ENGINE ? test.skip : test;
+
 const FIXTURE = path.join(__dirname, "fixtures", "sample-dicom.dcm");
 
 function capture() {
@@ -139,39 +148,45 @@ test("validateFiles streams files above the threshold (streamed: true)", async (
   expect(junk.records[0].status).toBe("fail");
 });
 
-test("validate --conformance passes a clean file and reports counts", async () => {
-  const out = capture();
-  const err = capture();
-  const code = await runValidate({
-    dcmjs,
-    positionals: [FIXTURE],
-    values: { conformance: true },
-    stdout: out.write,
-    stderr: err.write,
-  });
-  expect(code).toBe(0);
-  const text = out.lines.join("\n");
-  expect(text).toMatch(/ok\s+.*\(\d+ warnings, \d+ infos\)/);
-  expect(text).toMatch(/0 nonconformant/);
-});
+testConformance(
+  "validate --conformance passes a clean file and reports counts",
+  async () => {
+    const out = capture();
+    const err = capture();
+    const code = await runValidate({
+      dcmjs,
+      positionals: [FIXTURE],
+      values: { conformance: true },
+      stdout: out.write,
+      stderr: err.write,
+    });
+    expect(code).toBe(0);
+    const text = out.lines.join("\n");
+    expect(text).toMatch(/ok\s+.*\(\d+ warnings, \d+ infos\)/);
+    expect(text).toMatch(/0 nonconformant/);
+  }
+);
 
-test("validate --layers 1,2,3 flags a file missing its Type 1 Rows", async () => {
-  const out = capture();
-  const err = capture();
-  const code = await runValidate({
-    dcmjs,
-    positionals: [brokenPath],
-    values: { layers: "1,2,3" },
-    stdout: out.write,
-    stderr: err.write,
-  });
-  expect(code).toBe(1);
-  const text = out.lines.join("\n");
-  expect(text).toMatch(/NONCONFORMANT/);
-  expect(text).toMatch(/iod\.type1\.missing/);
-  expect(text).toMatch(/Rows/);
-  expect(text).toMatch(/1 nonconformant/);
-});
+testConformance(
+  "validate --layers 1,2,3 flags a file missing its Type 1 Rows",
+  async () => {
+    const out = capture();
+    const err = capture();
+    const code = await runValidate({
+      dcmjs,
+      positionals: [brokenPath],
+      values: { layers: "1,2,3" },
+      stdout: out.write,
+      stderr: err.write,
+    });
+    expect(code).toBe(1);
+    const text = out.lines.join("\n");
+    expect(text).toMatch(/NONCONFORMANT/);
+    expect(text).toMatch(/iod\.type1\.missing/);
+    expect(text).toMatch(/Rows/);
+    expect(text).toMatch(/1 nonconformant/);
+  }
+);
 
 test("validate rejects a --layers value outside 1,2,3", async () => {
   const out = capture();
@@ -187,26 +202,48 @@ test("validate rejects a --layers value outside 1,2,3", async () => {
   expect(err.lines.join("\n")).toMatch(/--layers/);
 });
 
-test("streamed conformance matches eager: ValidationListener path", async () => {
-  const { validateFiles } = await import("../src/commands/validate.js");
-  const conformance = { layers: [1, 2, 3] };
-  const streamed = await validateFiles({
-    dcmjs,
-    targets: [brokenPath],
-    streamThreshold: 1024,
-    conformance,
-  });
-  expect(streamed.records[0].streamed).toBe(true);
-  expect(streamed.records[0].status).toBe("nonconformant");
-  const rules = (streamed.records[0].issues || []).map((issue) => issue.rule);
-  expect(rules).toContain("iod.type1.missing");
+testConformance(
+  "streamed conformance matches eager: ValidationListener path",
+  async () => {
+    const { validateFiles } = await import("../src/commands/validate.js");
+    const conformance = { layers: [1, 2, 3] };
+    const streamed = await validateFiles({
+      dcmjs,
+      targets: [brokenPath],
+      streamThreshold: 1024,
+      conformance,
+    });
+    expect(streamed.records[0].streamed).toBe(true);
+    expect(streamed.records[0].status).toBe("nonconformant");
+    const rules = (streamed.records[0].issues || []).map((issue) => issue.rule);
+    expect(rules).toContain("iod.type1.missing");
 
-  const eager = await validateFiles({
-    dcmjs,
-    targets: [brokenPath],
-    conformance,
-  });
-  expect(eager.records[0].conformance.errors).toBe(
-    streamed.records[0].conformance.errors
-  );
-});
+    const eager = await validateFiles({
+      dcmjs,
+      targets: [brokenPath],
+      conformance,
+    });
+    expect(eager.records[0].conformance.errors).toBe(
+      streamed.records[0].conformance.errors
+    );
+  }
+);
+
+testNoEngine(
+  "--conformance without the engine exits 1 with a corrective message",
+  async () => {
+    const out = capture();
+    const err = capture();
+    const code = await runValidate({
+      dcmjs,
+      positionals: [FIXTURE],
+      values: { conformance: true },
+      stdout: out.write,
+      stderr: err.write,
+    });
+    expect(code).toBe(1);
+    const text = err.lines.join("\n");
+    expect(text).toMatch(/@dcmjs-org\/validator/);
+    expect(text).toMatch(/without --conformance/);
+  }
+);

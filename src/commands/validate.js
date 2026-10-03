@@ -30,6 +30,36 @@ Parse DICOM files and report failures.
 // parser — same conformance walk, bounded memory. Overridable for tests.
 const STREAM_THRESHOLD_BYTES = 2 ** 31;
 
+// The corrective text for every path that needs the conformance engine.
+const CONFORMANCE_UNAVAILABLE_MESSAGE =
+  "conformance checking requires the dcmjs validation engine, which " +
+  "arrives with @dcmjs-org/validator; until then run without --conformance";
+
+/**
+ * Feature-detect the conformance engine. The 1.0-beta dcmjs ships without
+ * dcmjs.validate (and its standalone validator package is a stub whose
+ * validate() throws "not implemented"), so presence of a function is not
+ * enough: probe it with an empty dataset inside try/catch. A real engine
+ * returns a report (or at worst complains about the input); the stub
+ * rejects with "not implemented".
+ *
+ * @param {Object} dcmjs the loaded dcmjs bundle
+ * @returns {Promise<boolean>} whether dcmjs.validate is a working engine
+ */
+export async function conformanceAvailable(dcmjs) {
+  if (typeof dcmjs.validate !== "function") {
+    return false;
+  }
+  try {
+    await dcmjs.validate({ dict: {}, meta: {} }, { layers: [1] });
+    return true;
+  } catch (err) {
+    // "not implemented" is the stub; any other complaint means a real
+    // engine objected to the probe input, which is fine.
+    return !/not implemented/i.test(err?.message || String(err));
+  }
+}
+
 // Fold a dcmjs.validate report into a file record. Errors make the file
 // nonconformant (the dciodvfy convention: warnings and infos inform,
 // errors fail); only non-info issues ride along, so a directory sweep's
@@ -85,7 +115,11 @@ export async function validateFiles({
 }) {
   const { DicomMessage } = dcmjs.data;
   const { fromPart10Stream, EventStreamListener } = dcmjs.eventStream;
-  const { ValidationListener } = dcmjs.validation;
+  // v2-only: absent on 1.0-beta dcmjs, where base validation still works.
+  const { ValidationListener } = dcmjs.validation ?? {};
+  if (conformance && !(await conformanceAvailable(dcmjs))) {
+    throw new Error(CONFORMANCE_UNAVAILABLE_MESSAGE);
+  }
   const files = [];
   for (const target of targets) {
     discoverDicomFiles(target, files);
@@ -112,6 +146,9 @@ export async function validateFiles({
       if (size >= streamThreshold) {
         // The streaming reader resolves quietly on a truncated input, so
         // completeness is the check: endDataSet must have fired.
+        if (conformance && !ValidationListener) {
+          throw new Error(CONFORMANCE_UNAVAILABLE_MESSAGE);
+        }
         const listener = conformance
           ? new (validatingCompletionListener(ValidationListener))(conformance)
           : new CompletionListener();
@@ -143,7 +180,10 @@ export async function validateFiles({
           ms: Date.now() - startedAt,
         };
         if (conformance) {
-          applyConformance(record, await dcmjs.validate(dicomDict, conformance));
+          applyConformance(
+            record,
+            await dcmjs.validate(dicomDict, conformance)
+          );
         }
         records.push(record);
       }
@@ -222,7 +262,9 @@ export async function runValidate({
       const summary = record.conformance
         ? `  (${record.conformance.warnings} warnings, ${record.conformance.infos} infos)`
         : "";
-      stdout(`ok    ${record.bytes}B  ${record.ms}ms  ${record.file}${summary}`);
+      stdout(
+        `ok    ${record.bytes}B  ${record.ms}ms  ${record.file}${summary}`
+      );
     }
   }
 
