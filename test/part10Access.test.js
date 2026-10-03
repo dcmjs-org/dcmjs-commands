@@ -16,7 +16,10 @@ import { DicomAccess } from "../src/access/DicomAccess.js";
 import { runTransfer } from "../src/commands/webTransfer.js";
 import { runDicomweb } from "../src/commands/dicomweb.js";
 import { extractFrame } from "../src/part10/part10ToDicomWebJson.js";
-import { looksLikeStaticDicomWeb, looksLikePart10Directory } from "../src/io.js";
+import {
+  looksLikeStaticDicomWeb,
+  looksLikePart10Directory,
+} from "../src/io.js";
 
 const require = createRequire(import.meta.url);
 const dcmjs = require("dcmjs");
@@ -230,7 +233,11 @@ describe("download from a Part 10 directory", () => {
   test("wrong StudyUID lists the studies actually found", async () => {
     const source = path.join(dir, "source");
     writeSourceTree(source);
-    const { code, err } = await download(source, path.join(dir, "web"), "9.9.9");
+    const { code, err } = await download(
+      source,
+      path.join(dir, "web"),
+      "9.9.9"
+    );
     expect(code).toBe(1);
     const message = err.join("\n");
     expect(message).toMatch(/found these studies instead/);
@@ -333,12 +340,8 @@ describe("frame extraction", () => {
       { ...naturalBase, NumberOfFrames: 3 },
       { encapsulated: false }
     );
-    const frame2 = new Uint16Array(
-      extractFrame([pixels.buffer], 2, entry)
-    );
-    expect(Array.from(frame2)).toEqual(
-      Array.from(pixels.slice(16, 32))
-    );
+    const frame2 = new Uint16Array(extractFrame([pixels.buffer], 2, entry));
+    expect(Array.from(frame2)).toEqual(Array.from(pixels.slice(16, 32)));
   });
 
   test("encapsulated with one fragment per frame maps directly", () => {
@@ -347,9 +350,9 @@ describe("frame extraction", () => {
       { ...naturalBase, NumberOfFrames: 2 },
       { encapsulated: true }
     );
-    expect(
-      Array.from(new Uint8Array(extractFrame(frames, 2, entry)))
-    ).toEqual([3, 4]);
+    expect(Array.from(new Uint8Array(extractFrame(frames, 2, entry)))).toEqual([
+      3, 4,
+    ]);
   });
 
   test("single-frame multi-fragment concatenates", () => {
@@ -379,8 +382,8 @@ describe("frame extraction", () => {
       { ...naturalBase, NumberOfFrames: 1 },
       { encapsulated: false }
     );
-    expect(() =>
-      extractFrame([new Uint8Array(10).buffer], 1, entry)
-    ).toThrow(/10 bytes but 1 frame\(s\).*need 32/);
+    expect(() => extractFrame([new Uint8Array(10).buffer], 1, entry)).toThrow(
+      /10 bytes but 1 frame\(s\).*need 32/
+    );
   });
 });

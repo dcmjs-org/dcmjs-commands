@@ -102,11 +102,7 @@ async function sanitizeLevel(dict, sopUID, bulkdataMap, frameInfo) {
       // Non-pixel binary (LUTs, ICC profiles, ...): pre-compute the exact
       // series-relative hashed path the destination will store it under.
       const buffer = toExactArrayBuffer(values[0]);
-      const { hashCode, extension } = await getBulkdataInfo(
-        key,
-        entry,
-        buffer
-      );
+      const { hashCode, extension } = await getBulkdataInfo(key, entry, buffer);
       const bulkDataURI =
         `../../bulkdata/${hashCode.substring(0, 3)}/` +
         `${hashCode.substring(3, 6)}/${hashCode}.${extension}`;

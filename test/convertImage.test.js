@@ -96,10 +96,7 @@ test("sniffKind detects png and jpeg magic", () => {
 });
 
 test("png + auto-discovered sidecar → derived MR instance", async () => {
-  fs.writeFileSync(
-    path.join(dir, "ramp.json"),
-    JSON.stringify(sidecar())
-  );
+  fs.writeFileSync(path.join(dir, "ramp.json"), JSON.stringify(sidecar()));
   const outPath = path.join(dir, "out.dcm");
   const { code, err } = await convert([path.join(dir, "ramp.png")], {
     to: "dcm",
@@ -158,9 +155,7 @@ test("dimension mismatch is a hard, corrective error", async () => {
 test("BitsStored claim without --restore-values warns and proceeds 8-bit", async () => {
   fs.writeFileSync(
     path.join(dir, "ramp.json"),
-    JSON.stringify(
-      sidecar({ "00280101": { vr: "US", Value: [12] } })
-    )
+    JSON.stringify(sidecar({ "00280101": { vr: "US", Value: [12] } }))
   );
   const outPath = path.join(dir, "out.dcm");
   const { code, err } = await convert([path.join(dir, "ramp.png")], {

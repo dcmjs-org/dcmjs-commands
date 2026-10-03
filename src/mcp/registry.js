@@ -81,7 +81,10 @@ export const TOOLS = {
       if (result.code !== 0) {
         throw commandError("dicom_instance", result);
       }
-      return ok({ instance: JSON.parse(result.stdoutLines.join("\n")) }, result);
+      return ok(
+        { instance: JSON.parse(result.stdoutLines.join("\n")) },
+        result
+      );
     },
   },
 
@@ -211,10 +214,7 @@ export const TOOLS = {
       if (binaryTarget || (args.output && !binaryTarget)) {
         return ok({ written: args.output }, result);
       }
-      return ok(
-        { result: JSON.parse(result.stdoutLines.join("\n")) },
-        result
-      );
+      return ok({ result: JSON.parse(result.stdoutLines.join("\n")) }, result);
     },
   },
 
@@ -250,7 +250,11 @@ export const TOOLS = {
       }
       const wroteLine = result.stdoutLines.find((l) => l.includes("wrote"));
       return ok(
-        { written: wroteLine ? wroteLine.replace(/^anonymize: wrote /, "") : args.output },
+        {
+          written: wroteLine
+            ? wroteLine.replace(/^anonymize: wrote /, "")
+            : args.output,
+        },
         result
       );
     },
@@ -363,7 +367,10 @@ export const TOOLS = {
         summary.match(/→ (.*) \([\d,]+ bytes\)/)?.[1] ??
         args.output ??
         `${args.directory}/DICOMDIR`;
-      return ok({ written, summary: summary.replace(/^dicomdir: /, "") }, result);
+      return ok(
+        { written, summary: summary.replace(/^dicomdir: /, "") },
+        result
+      );
     },
   },
 

@@ -233,9 +233,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
     // this.url = .../series/<uid>/instances/<sop>; URIs are series-relative
     const filePath = path.resolve(this.url, "../..", uri);
     if (!fsBase.existsSync(filePath)) {
-      throw new Error(
-        `bulkdata file not found for tag ${key}: ${filePath}`
-      );
+      throw new Error(`bulkdata file not found for tag ${key}: ${filePath}`);
     }
     const raw = fsBase.readFileSync(filePath);
     const headerEnd = raw.indexOf("\r\n\r\n");

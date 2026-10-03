@@ -164,10 +164,7 @@ export function buildFhirLayer({
   if (encounterResource) {
     encounter = structuredClone(encounterResource);
     if (!encounter.id) {
-      encounter.id = toFhirId(
-        encounter.identifier?.[0]?.value,
-        "encounter-1"
-      );
+      encounter.id = toFhirId(encounter.identifier?.[0]?.value, "encounter-1");
     }
     if (!encounter.subject) {
       encounter.subject = { reference: `Patient/${patient.id}` };
@@ -207,7 +204,8 @@ export function buildFhirLayer({
       {
         coding: [
           {
-            system: "http://terminology.hl7.org/CodeSystem/endpoint-payload-type",
+            system:
+              "http://terminology.hl7.org/CodeSystem/endpoint-payload-type",
             code: "any",
           },
         ],
@@ -269,7 +267,9 @@ export function writeFhirLayer(destDir, layer) {
     }
     for (const file of fs.readdirSync(typePath).sort()) {
       if (file.endsWith(".json")) {
-        all.push(JSON.parse(fs.readFileSync(path.join(typePath, file), "utf8")));
+        all.push(
+          JSON.parse(fs.readFileSync(path.join(typePath, file), "utf8"))
+        );
       }
     }
   }

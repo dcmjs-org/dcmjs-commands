@@ -103,7 +103,13 @@ function stagingOrder(a, b) {
   );
 }
 
-export async function runDicomdir({ dcmjs, positionals, values, stdout, stderr }) {
+export async function runDicomdir({
+  dcmjs,
+  positionals,
+  values,
+  stdout,
+  stderr,
+}) {
   const [rootDir] = positionals;
   if (!rootDir) {
     stderr("dicomdir: missing <directory>");
@@ -201,7 +207,9 @@ export async function runDicomdir({ dcmjs, positionals, values, stdout, stderr }
           {
             output,
             summary,
-            entries: entries.map(({ sourcePath: _sourcePath, ...entry }) => entry),
+            entries: entries.map(
+              ({ sourcePath: _sourcePath, ...entry }) => entry
+            ),
             warnings,
             skipped,
           },

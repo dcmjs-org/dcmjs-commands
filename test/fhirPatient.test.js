@@ -25,9 +25,7 @@ const FIXTURE = path.join(__dirname, "fixtures", "sample-dicom.dcm");
 
 const JANE_FOX = {
   resourceType: "Patient",
-  identifier: [
-    { type: { coding: [{ code: "MR" }] }, value: "22446688" },
-  ],
+  identifier: [{ type: { coding: [{ code: "MR" }] }, value: "22446688" }],
   name: [
     { use: "official", family: "FOX", given: ["JANE"] },
     { use: "maiden", family: "DOE", given: ["JANE"] },

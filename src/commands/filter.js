@@ -48,9 +48,7 @@ export function loadFhirPatientAttrs(dcmjs, filePath) {
   try {
     resource = JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch (err) {
-    throw new Error(
-      `could not read FHIR Patient ${filePath}: ${err.message}`
-    );
+    throw new Error(`could not read FHIR Patient ${filePath}: ${err.message}`);
   }
   return dcmjs.fhir.patientToDataset(resource);
 }
@@ -98,7 +96,7 @@ function makeSetFilter(assignments) {
       }
       injected = true;
       return next(replacements.get(currentTag), opts);
-    }
+    },
   };
 }
 
@@ -161,7 +159,7 @@ function makeDropFilter(tags) {
     endBinary: gate(),
     bulkDataReference: gate(),
     startItem: gate(),
-    endItem: gate()
+    endItem: gate(),
   };
 }
 
@@ -178,7 +176,13 @@ async function loadModuleFilters(files) {
   return filters;
 }
 
-export async function runFilter({ dcmjs, positionals, values, stdout, stderr }) {
+export async function runFilter({
+  dcmjs,
+  positionals,
+  values,
+  stdout,
+  stderr,
+}) {
   if (values.help) {
     stdout(filterUsage);
     return 0;
@@ -203,9 +207,9 @@ export async function runFilter({ dcmjs, positionals, values, stdout, stderr }) 
         ? [
             makeFhirPatientFilter(
               loadFhirPatientAttrs(dcmjs, values["fhir-patient"])
-            )
+            ),
           ]
-        : [])
+        : []),
     ];
   } catch (e) {
     stderr(`dcmjs filter: ${e.message}`);
@@ -216,11 +220,11 @@ export async function runFilter({ dcmjs, positionals, values, stdout, stderr }) 
   let pending = false;
   const writer = new StreamingPart10Writer(
     {
-      onChunk: chunk => {
+      onChunk: (chunk) => {
         if (!out.write(chunk)) {
           pending = true;
         }
-      }
+      },
     },
     ...filters
   );
@@ -233,7 +237,7 @@ export async function runFilter({ dcmjs, positionals, values, stdout, stderr }) 
 
   try {
     const input = fs.createReadStream(inFile, {
-      highWaterMark: 8 * 1024 * 1024
+      highWaterMark: 8 * 1024 * 1024,
     });
     await fromPart10Stream(input, writer);
     out.end();

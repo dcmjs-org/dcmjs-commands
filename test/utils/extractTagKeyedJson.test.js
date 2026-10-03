@@ -59,7 +59,7 @@ test("SQ item contents are not flattened out of their sequence", () => {
 
 test("eight-hex keys without a vr are not tag entries", () => {
   const { tags, ignoredKeys } = extractTagKeyedJson({
-    "12345678": { note: "looks like a tag, is not DICOM JSON" },
+    12345678: { note: "looks like a tag, is not DICOM JSON" },
   });
   expect(Object.keys(tags)).toHaveLength(0);
   expect(ignoredKeys).toContain("12345678");

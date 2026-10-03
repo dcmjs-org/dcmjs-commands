@@ -251,7 +251,16 @@ function restoreStoredValues(decoded, tags, stderr) {
   };
 }
 
-async function convertImage({ dcmjs, arrayBuffer, kind, to, values, input, stderr, fhirAttrs }) {
+async function convertImage({
+  dcmjs,
+  arrayBuffer,
+  kind,
+  to,
+  values,
+  input,
+  stderr,
+  fhirAttrs,
+}) {
   const metadata = resolveImageMetadata(input, values, stderr);
   let decoded = decodeImage(kind, arrayBuffer);
 
@@ -274,7 +283,10 @@ async function convertImage({ dcmjs, arrayBuffer, kind, to, values, input, stder
     decoded = restoreStoredValues(decoded, metadata.tags, stderr);
   } else {
     const claimedBitsStored = tagNumber(metadata.tags, "00280101");
-    if (claimedBitsStored !== undefined && claimedBitsStored > decoded.bitsStored) {
+    if (
+      claimedBitsStored !== undefined &&
+      claimedBitsStored > decoded.bitsStored
+    ) {
       stderr(
         `convert: warning: image is ${decoded.bitsStored}-bit but metadata ` +
           `claims BitsStored=${claimedBitsStored} — pass --restore-values to ` +
@@ -297,9 +309,7 @@ async function convertImage({ dcmjs, arrayBuffer, kind, to, values, input, stder
     // FHIR Patient wins over metadata and the individual patient flags;
     // its empties are deliberate (deterministic overwrite of the module)
     ...(fhirAttrs || {}),
-    ...(values["restore-values"]
-      ? { lossy: { method: "ISO_10918_1" } }
-      : {}),
+    ...(values["restore-values"] ? { lossy: { method: "ISO_10918_1" } } : {}),
   });
 
   if (to === "dcm") {

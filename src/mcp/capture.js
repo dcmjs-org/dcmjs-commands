@@ -5,7 +5,10 @@
 // for injection from day one — this is the whole adapter between the CLI
 // surface and MCP tool handlers.
 
-export async function runCaptured(runFn, { dcmjs, positionals = [], values = {} }) {
+export async function runCaptured(
+  runFn,
+  { dcmjs, positionals = [], values = {} }
+) {
   const stdoutLines = [];
   const stderrLines = [];
   const code = await runFn({

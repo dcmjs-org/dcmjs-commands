@@ -190,10 +190,7 @@ describe("dcmjs dicomweb --fhir end to end", () => {
       sopUid: "2.25.888.2.1",
       seriesUid: "2.25.888.2",
     });
-    fs.writeFileSync(
-      path.join(dir, "jane-fox.json"),
-      JSON.stringify(JANE_FOX)
-    );
+    fs.writeFileSync(path.join(dir, "jane-fox.json"), JSON.stringify(JANE_FOX));
   });
 
   afterEach(() => {

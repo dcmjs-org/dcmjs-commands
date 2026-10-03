@@ -74,7 +74,10 @@ export async function runDicomweb({
       ? loadEncounterResource(values["fhir-encounter"])
       : undefined;
     const wantFhir =
-      values.fhir || patientResource || encounterResource || values["wado-root"];
+      values.fhir ||
+      patientResource ||
+      encounterResource ||
+      values["wado-root"];
 
     let studyUIDs;
     if (typeof source.scan === "function") {
