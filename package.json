@@ -57,7 +57,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.1.0",
-    "dcmjs": "file:../dcmjs",
+    "dcmjs": "file:../dcmjs-integration",
     "dicomweb-client": "^0.11.2",
     "jpeg-js": "^0.4.4",
     "jsdom": "^29.1.1",
