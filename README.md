@@ -45,7 +45,7 @@ APIs, pipeable CLI, SMART-context inputs), see
 
 ## Install
 
-Requires Node >= 22.13. This branch (`feat/patient-access`, which contains
+Requires Node >= 22.13. This branch (`release/1.0`, which contains
 the whole arc: the modernized CLI, the dcmjs 1.0 integration, and the
 patient-access command) builds against the **dcmjs 1.0-beta preview** — the
 merge of all ten open dcmjs assembly PRs. The `dcmjs` dependency points at a
@@ -53,7 +53,7 @@ sibling checkout named `dcmjs-integration`, which must be built first:
 
 ```bash
 # this package and its dcmjs sibling, side by side — note the branch names
-git clone -b feat/patient-access https://github.com/awatson1978/dcmjs-commands.git
+git clone -b release/1.0 https://github.com/awatson1978/dcmjs-commands.git
 git clone -b integration/1.0-beta-preview https://github.com/awatson1978/dcmjs.git dcmjs-integration
 
 # build the sibling first (pnpm — it is a pnpm workspace)

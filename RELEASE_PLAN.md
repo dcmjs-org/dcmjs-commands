@@ -39,10 +39,16 @@ set, the MCP server, the test suite, the examples. Its dcmjs dependency is
 declared as a `file:` sibling plus a CI step that checks out and builds the
 dcmjs integration branch — deliberately, see section 3.
 
-**PR-2 — the dcmjs 1.0 integration.** Stacked on PR-1: the five commits that
-make the fork true on dcmjs 1.0-beta — the validate feature-detect, two
-hygiene fixes, the dependency pointer, and the CI wiring. Small and
-reviewable on its own.
+**PR-2 — the dcmjs 1.0 integration and the patient-access command.** From
+the `release/1.0` branch, which contains PR-1's history plus two slices: the
+five commits that make the fork true on dcmjs 1.0-beta (the validate
+feature-detect, two hygiene fixes, the dependency pointer, the CI wiring),
+and the `patient-access` command implementing the Argonaut SMART Imaging
+Access IG, with a real end-to-end transcript against the Argonaut reference
+server in EXAMPLES.md. Because PR-2 contains PR-1, its diff shows the whole
+arc until PR-1 merges and then shrinks to just the integration and
+patient-access delta — the same trunk-overlap pattern the dcmjs assembly
+PRs use. Review and merge PR-1 first.
 
 Both PRs carry the full description standard from the dcmjs landing:
 first-person narrative, worked read and write examples actually executed,
@@ -94,13 +100,6 @@ green locally and the PR checks re-run once the lock clears.
 
 ## 6. Deliberately not in these PRs
 
-- **`patient-access`** — the new command implementing the Argonaut SMART
-  Imaging Access IG (discovery via `.well-known/smart-configuration`, SMART
-  App Launch with PKCE, `ImagingStudy?patient=…&_include=ImagingStudy:endpoint`,
-  Endpoint resolution, WADO-RS retrieval with the same token). It is being
-  built now on `feat/patient-access` and arrives as its own follow-up PR with
-  its own evidence, so the modernization review isn't entangled with a new
-  feature.
 - **`dimsejs`** — remains the stub it has always been.
 - **SMART Backend Services** — the system-to-system authorization mode;
   planned as patient-access v2.
