@@ -642,9 +642,10 @@ print one completion line by default; `--verbose` narrates per-instance
 progress.
 
 ```bash
-# Dump query/metadata responses
+# Dump query/metadata responses (local Static-DICOMweb trees store
+# compressed files — name them explicitly: metadata.gz)
 dicomwebjs dump https://server/dicomweb/studies?PatientID=12345
-dicomwebjs dump ./dicomweb/studies/1.2.840.../series/1.2.840.../metadata
+dicomwebjs dump ./dicomweb/studies/1.2.840.../series/1.2.840.../metadata.gz
 
 # Instance metadata as DICOM JSON
 dicomwebjs instance https://server/dicomweb/studies/1.2.840.../metadata --pretty
@@ -691,10 +692,10 @@ dcmjs patient-access \
 
 A real transcript against the Argonaut reference stack's open
 (no-authorization) configuration at `https://imaging.argo.run/open/fhir`
-(run 2026-10-03; `--token dummy` because open mode ignores the
-Authorization header; NODE_TLS_REJECT_UNAUTHORIZED=0 was needed because
-the server's TLS certificate expired on 2026-09-23 — drop it once the
-cert is renewed):
+(run 2026-10-03, re-verified 2026-10-05; `--token dummy` because open
+mode ignores the Authorization header; NODE_TLS_REJECT_UNAUTHORIZED=0
+was needed because the server's TLS certificate expired on 2026-09-23 —
+drop it once the cert is renewed):
 
 ```bash
 dcmjs patient-access \

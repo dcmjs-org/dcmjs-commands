@@ -183,6 +183,11 @@ for eager parsing validate through the streaming engine — same rules,
 bounded memory. `--json` reports include each file's conformance
 summary and any non-info issues.
 
+> **Note:** the conformance engine ships with `@dcmjs-org/validator`,
+> which is not yet part of the dcmjs 1.0-beta bundle. Until it lands,
+> `--conformance` and `--layers` print a corrective message and exit;
+> plain `validate` (parse checking) is fully functional today.
+
 ### dicomdir
 
 Build a DICOMDIR — the index file on DICOM interchange media (CDs, DVDs,
