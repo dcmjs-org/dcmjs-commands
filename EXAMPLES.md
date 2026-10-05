@@ -171,17 +171,22 @@ warning that one trailing byte may survive.
 The conversion was developed against a real stress fixture: a 21.8 GB
 1080p60 H.264 recording (208,948 frames), plus an *independently built*
 reference DICOM encapsulation of it — a ~150-line Python-stdlib script
-(`build_dicom_video.py`) that implements Supplement 225 straight from the
-spec, with a plain-Node verifier (`verify_dicom_video.mjs`, no dcmjs
-imports) that walks the written file and SHA-256-compares the
-reconstructed stream against the source MP4. Cross-implementation
-agreement, both ways: our encoder's output must satisfy their verifier,
-and their encoder's output must convert back through us byte-identically.
+(`scripts/build_dicom_video.py`) that implements Supplement 225 straight
+from the spec, with a plain-Node verifier
+(`scripts/verify_dicom_video.mjs`, no dcmjs imports) that walks the
+written file and SHA-256-compares the reconstructed stream against the
+source MP4. Cross-implementation agreement, both ways: our encoder's
+output must satisfy their verifier, and their encoder's output must
+convert back through us byte-identically.
+
+Both scripts ship in this repo. The fixture itself is built from a public
+download — see
+[Obtaining the large test fixtures](#obtaining-the-large-test-fixtures).
 
 ```bash
 # our encoder, their verifier
 dcmjs convert video48-h264-50mbps.mp4 --to dcm -o ours.dcm
-node verify_dicom_video.mjs ours.dcm video48-h264-50mbps.mp4
+node scripts/verify_dicom_video.mjs ours.dcm video48-h264-50mbps.mp4
 # MATCH — byte-identical round trip
 
 # their encoder, our decoder
@@ -204,9 +209,11 @@ so `--max-old-space-size` would never notice a 20 GB buffering bug;
 
 The CMB-MML whole-slide microscopy study (one H&E slide, imaged as a
 pyramid of five DICOM SM instances from a 4.5 MB thumbnail to a 4.7 GB
-full-resolution level) exercises both ends of the toolkit: the big
-instances prove the streaming story on real data, and the tiles inside
-them are ordinary JPEGs the image-conversion path can round-trip.
+full-resolution level; public — see
+[Obtaining the large test fixtures](#obtaining-the-large-test-fixtures))
+exercises both ends of the toolkit: the big instances prove the streaming
+story on real data, and the tiles inside them are ordinary JPEGs the
+image-conversion path can round-trip.
 
 The big end first — the same commands from the earlier sections, unchanged
 on a 4.7 GB instance:
@@ -267,6 +274,75 @@ above: real pathology pixels, rebuilt into a conformant instance. Pair the
 extracted tile with a DICOM JSON sidecar naming the source instance and
 the rebuild gets the full derived-instance treatment (fresh
 SOPInstanceUID, `DERIVED\SECONDARY`, `SourceImageSequence`).
+
+## Obtaining the large test fixtures
+
+Neither large fixture is committed — one is ~6 GB of public data, the
+other is built by re-encoding a public download. Both sources are free;
+note the licenses.
+
+### The whole-slide study (CMB-MML, ~6.1 GB)
+
+From the NCI Imaging Data Commons **CMB-MML** collection (Cancer Moonshot
+Biobank, Multiple Myeloma), distributed under **CC BY 4.0**:
+
+```bash
+python -m pip install --upgrade idc-index
+
+idc download 1.3.6.1.4.1.5962.99.1.1152570677.393312001.1714844554549.4.0 \
+  --download-dir ./cmb-mml-wsi
+```
+
+That series is the five-instance pyramid used above (StudyInstanceUID
+`2.25.38486921415375192085119638789590997695`). The 4.7 GiB
+full-resolution instance alone can be fetched resumably without the
+client:
+
+```bash
+curl -L -C - \
+  "https://s3.amazonaws.com/idc-open-data/cf4b8b66-a98b-41d0-a938-f5d069bb9eea/17a26857-3a5a-40d1-8e3a-6f0777383465.dcm" \
+  -o large-wsi.dcm
+```
+
+Browse the collection at
+<https://portal.imaging.datacommons.cancer.gov/collections/cmb_mml/>, or
+open the study in IDC's Slim viewer:
+<https://viewer.imaging.datacommons.cancer.gov/slim/studies/2.25.38486921415375192085119638789590997695>.
+
+### The 21.8 GB video (MIPO video48, re-encoded)
+
+The source is `video48.mp4` from the **MIPO dataset** — surgical
+recordings of distal-radius-fracture operations (1920×1080, ~60 fps),
+distributed under **CC BY-NC 4.0** (non-commercial):
+
+```bash
+curl -L -C - \
+  "https://zenodo.org/api/records/17698695/files/video48.mp4/content" \
+  -o video48.mp4
+md5sum video48.mp4   # a69af405ff0f7d7ccf3b58afebb10596
+```
+
+That download is 1.3 GB (a complete ~58-minute operation). The 21.8 GB
+stress fixture is *manufactured* from it: re-encode at a constant
+50 Mb/s, which crosses the 16 GiB mark while staying within H.264 High
+Profile Level 4.2:
+
+```bash
+ffmpeg -i video48.mp4 \
+  -map 0:v:0 -map 0:a? \
+  -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1" \
+  -r 60 -fps_mode cfr \
+  -c:v libx264 -preset medium -profile:v high -level:v 4.2 -pix_fmt yuv420p \
+  -b:v 50M -minrate 50M -maxrate 50M -bufsize 50M \
+  -x264-params "nal-hrd=cbr:force-cfr=1:keyint=120:min-keyint=120:scenecut=0" \
+  -c:a aac -b:a 192k -ar 48000 -ac 2 \
+  video48-h264-50mbps.mp4
+```
+
+The re-encode takes a while — it is an hour of 1080p60 at constant
+bitrate. Dataset documentation:
+<https://github.com/camGcam/MIPO-Dataset>; video downloads:
+<https://zenodo.org/records/17698695>.
 
 ## `dcmjs validate` — sweep a corpus
 
