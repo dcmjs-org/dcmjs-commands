@@ -215,24 +215,27 @@ exercises both ends of the toolkit: the big instances prove the streaming
 story on real data, and the tiles inside them are ordinary JPEGs the
 image-conversion path can round-trip.
 
-The big end first — the same commands from the earlier sections, unchanged
-on a 4.7 GB instance:
+The big end first — the same commands from the earlier sections:
 
 ```bash
-dcmjs dump full-resolution-level.dcm | head -40   # 0.2 s: the reader stops
-                                                  # before pixel data
-dcmjs validate ./cmb_mml/                         # 5/5 clean — files above
-                                                  # 2 GiB validate through
-                                                  # the streaming parser
-dcmjs dicomweb ./cmb_mml/ -d ./slide-web          # Static-DICOMweb publish
+dcmjs dump pyramid-level-900mb.dcm | head -40   # 1.4 s on a 928 MB level:
+                                                # the reader stops before
+                                                # pixel data
+dcmjs validate ./cmb_mml/                       # 5/5 clean — the 4.7 GB
+                                                # level validates through
+                                                # the streaming parser (~10 s)
+dcmjs dicomweb ./cmb_mml/ -d ./slide-web        # Static-DICOMweb publish
 ```
 
-One honest boundary: the publisher's frame extractor still reads whole
-files, and Node caps a single read at 2 GiB — so `dcmjs dicomweb`
-publishes the four pyramid levels below that (26,522 frames in ~11 s)
-and reports the full-resolution level as skipped, on stderr, with the
-reason. Streaming publish for over-2-GiB instances is a flagged
-follow-up; a skipped instance is always announced, never silent.
+One honest boundary, in two places: eager readers cap at Node's 2 GiB
+single-read limit. `dump` on the 4.7 GB full-resolution level answers
+`dump: File size (5012980492) is greater than 2 GiB` (use `validate`,
+which streams, to check it), and the publisher's frame extractor has the
+same ceiling — so `dcmjs dicomweb` publishes the four pyramid levels
+below it (26,522 frames in ~11 s) and reports the full-resolution level
+as skipped, on stderr, with the reason. Streaming paths for over-2-GiB
+instances are a flagged follow-up; a skipped instance is always
+announced, never silent.
 
 The tiles: a whole-slide level with the JPEG transfer syntax stores one
 JPEG per frame, so a frame's bytes are a complete `.jpg` file. The library
@@ -259,8 +262,10 @@ console.log(`frame ${frame}/${fragments.length} → ${output}`);
 ```
 
 ```bash
-# a 240x240 H&E tile out of the pyramid's thumbnail level...
-node extract-frame.mjs thumbnail-level.dcm tile.jpg 56
+# a 240x240 H&E tile out of the pyramid's lowest tiled level (112 frames;
+# note the instance marked THUMBNAIL proper is a single-frame overview)
+node extract-frame.mjs lowest-tiled-level.dcm tile.jpg 56
+# frame 56/112 → tile.jpg
 file tile.jpg
 # tile.jpg: JPEG image data, baseline, precision 8, 240x240, components 3
 
@@ -268,6 +273,10 @@ file tile.jpg
 dcmjs convert tile.jpg --to dcm -o tile.dcm \
     --patient-name "DOE^JANE" --patient-id 12345
 ```
+
+(A harmless `Invalid vr type OV - using UN` may print while extracting —
+the instance's Extended Offset Table uses the OV value representation,
+which the naturalizer maps to UN.)
 
 That last command is the same forward-migration path as the PNG examples
 above: real pathology pixels, rebuilt into a conformant instance. Pair the
