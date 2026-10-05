@@ -16,7 +16,7 @@ the dcmjs 1.0 rewrite as it landed:
 
 | Area     | What the fork adds                                                                                                                                                                                                                                                                      |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime  | npm + Node >= 22.13 (bun removed), ESM throughout, jest test suite (190 tests)                                                                                                                                                                                                          |
+| Runtime  | npm + Node >= 22.13 (bun removed), ESM throughout, jest test suite (236 tests)                                                                                                                                                                                                          |
 | Commands | `dump`, `instance`, `convert` (JSON/FHIR/PDF/PNG/JPEG/MP4 in both directions), `filter` (streaming `--set`/`--drop`/`--module`/`--fhir-patient`), `anonymize`, `validate` (+`--conformance`, feature-detected), `dicomdir`, `dicomweb` (Static-DICOMweb publisher, optional FHIR layer) |
 | DICOMweb | `dicomwebjs` retained and extended (Part 10 ↔ Static-DICOMweb both directions)                                                                                                                                                                                                          |
 | Agents   | `dcmjs-mcp` — an MCP stdio server exposing every command as a typed tool                                                                                                                                                                                                                |
@@ -28,29 +28,28 @@ Everything above runs against dcmjs 1.0: we built a preview of dcmjs
 #542, #543, #575, #577, #584, #585, #588, #595 — branch
 `integration/1.0-beta-preview` on awatson1978/dcmjs, 1,051 of its own tests
 green), linked the fork against it, and brought the fork to fully green:
-**190 tests — 187 passing, 3 deliberately skipped, 0 failing**, lint and
+**236 tests — 233 passing, 3 deliberately skipped, 0 failing**, lint and
 format clean, plus a command-by-command run of every EXAMPLES.md recipe.
 
-## 2. The shape: two pull requests
+## 2. The shape: one pull request, staged history
 
-**PR-1 — the modernization.** The whole feature arc, from the fork's
-development line into upstream `main`. This is the big review: the command
-set, the MCP server, the test suite, the examples. Its dcmjs dependency is
-declared as a `file:` sibling plus a CI step that checks out and builds the
-dcmjs integration branch — deliberately, see section 3.
+**The PR — modernization, dcmjs 1.0 integration, and patient-access.** One
+PR from the `release/1.0` assembly branch into upstream `main`, carrying the
+whole arc in reviewable stages: the modernization (the command set, the MCP
+server, the test suite, the examples), then the five commits that make the
+fork true on dcmjs 1.0-beta (the validate feature-detect, two hygiene fixes,
+the dependency pointer, the CI wiring), then the `patient-access` command
+implementing the Argonaut SMART Imaging Access IG, with a real end-to-end
+transcript against the Argonaut reference server in EXAMPLES.md. The dcmjs
+dependency is declared as a `file:` sibling plus a CI step that checks out
+and builds the dcmjs integration branch — deliberately, see section 3.
 
-**PR-2 — the dcmjs 1.0 integration and the patient-access command.** From
-the `release/1.0` branch, which contains PR-1's history plus two slices: the
-five commits that make the fork true on dcmjs 1.0-beta (the validate
-feature-detect, two hygiene fixes, the dependency pointer, the CI wiring),
-and the `patient-access` command implementing the Argonaut SMART Imaging
-Access IG, with a real end-to-end transcript against the Argonaut reference
-server in EXAMPLES.md. Because PR-2 contains PR-1, its diff shows the whole
-arc until PR-1 merges and then shrinks to just the integration and
-patient-access delta — the same trunk-overlap pattern the dcmjs assembly
-PRs use. Review and merge PR-1 first.
+This landing was briefly staged as two overlapping PRs (the dcmjs
+assembly-PR pattern); they were combined into this one so the review is a
+single conversation over one branch. The history preserves the stages —
+review commit-by-commit, merge as a merge commit, and the story survives.
 
-Both PRs carry the full description standard from the dcmjs landing:
+The PR carries the full description standard from the dcmjs landing:
 first-person narrative, worked read and write examples actually executed,
 test evidence with counts, honest caveats.
 
@@ -59,7 +58,7 @@ test evidence with counts, honest caveats.
 The fork needs dcmjs 1.0, which is not on npm yet; the maintainers want
 evidence before publishing it. So the dependency is staged:
 
-1. **Now (these PRs):** `"dcmjs": "file:../dcmjs-integration"` with CI
+1. **Now (this PR):** `"dcmjs": "file:../dcmjs-integration"` with CI
    building `awatson1978/dcmjs@integration/1.0-beta-preview` as a sibling.
    The green CLI suite _is_ the downstream evidence that the ten dcmjs
    assembly PRs compose correctly — this repo is dcmjs 1.0's first consumer.
@@ -72,9 +71,9 @@ evidence before publishing it. So the dependency is staged:
 
 ## 4. Test evidence standards
 
-Every PR in this landing states: jest counts (expected: 187 passed, 3
-skipped — the skips are conformance tests awaiting the validation engine,
-each commented), lint and format-check clean, the EXAMPLES.md sweep result,
+The PR states: jest counts (expected: 233 passed, 3 skipped — the skips
+are conformance tests awaiting the validation engine, each commented),
+lint and format-check clean, the EXAMPLES.md sweep result,
 and Node versions (22 and 24, matching dcmjs's matrix). CI runs on the fork
 are currently queued behind a GitHub Actions billing lock on the account; the
 identical gate sequence (`npm ci`, lint, format:check, test) was verified
@@ -89,16 +88,16 @@ green locally and the PR checks re-run once the lock clears.
   comment naming the future home. Everything returns when the validator
   package becomes real.
 - **`metadata` vs `metadata.gz`.** The Static-DICOMweb publisher writes
-  `metadata.gz`; one EXAMPLES.md recipe shows the uncompressed path and the
-  reader does no fallback. Pre-existing documentation/implementation mismatch,
-  unrelated to dcmjs 1.0 — fixed or documented inside PR-1 before it opens.
+  `metadata.gz`; one EXAMPLES.md recipe showed the uncompressed path and the
+  reader does no fallback. Fixed in this branch — EXAMPLES.md now names
+  `metadata.gz` explicitly for local trees (verified by running the recipe).
 - **Bench corpus assumption.** `bench/baseline.js` defaults to fixture paths
   from the dcmjs 0.x checkout layout; it runs fine with explicit file
   arguments. Cosmetic.
 - **Version self-report.** The integration bundle reports dcmjs 0.49.2 until
   the real beta is stamped by the dcmjs publish pipeline. Expected.
 
-## 6. Deliberately not in these PRs
+## 6. Deliberately not in this PR
 
 - **`dimsejs`** — remains the stub it has always been.
 - **SMART Backend Services** — the system-to-system authorization mode;
@@ -106,7 +105,7 @@ green locally and the PR checks re-run once the lock clears.
 
 ## 7. What we ask of the maintainers
 
-1. Review PR-1 and PR-2 (the RELEASE_PLAN you are reading rides with them).
+1. Review the PR (the RELEASE_PLAN you are reading rides with it).
 2. Use the green downstream suite as the evidence case for merging the ten
    dcmjs assembly PRs and flipping the dcmjs publish environment switch.
 3. After `@dcmjs-org/dcmjs@beta` publishes, approve the stage-3 dependency
