@@ -152,3 +152,35 @@ test("--help prints usage and exits 0", async () => {
   expect(code).toBe(0);
   expect(text).toContain("usage");
 });
+
+test("refuses to overwrite the input file in place", async () => {
+  const inPlace = path.join(tmpDir, "inplace.dcm");
+  fs.copyFileSync(FIXTURE, inPlace);
+  const before = fs.readFileSync(inPlace);
+  const { code, err } = await filter([inPlace], {
+    output: path.join(tmpDir, ".", "inplace.dcm"),
+    set: ["00100010=GONE"],
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/refusing to overwrite the input file in place/);
+  expect(fs.readFileSync(inPlace).equals(before)).toBe(true);
+});
+
+test("truncated input leaves no partial output file", async () => {
+  const truncated = path.join(tmpDir, "truncated.dcm");
+  const bytes = fs.readFileSync(FIXTURE);
+  fs.writeFileSync(truncated, bytes.subarray(0, Math.floor(bytes.length / 2)));
+  const outFile = path.join(tmpDir, "from-truncated.dcm");
+  const { code, err } = await filter([truncated], { output: outFile });
+  expect(code).toBe(1);
+  expect(err).toMatch(/dcmjs filter:/);
+  expect(fs.existsSync(outFile)).toBe(false);
+});
+
+test("an unwritable output path fails cleanly instead of crashing", async () => {
+  const outFile = path.join(tmpDir, "no-such-dir", "out.dcm");
+  const { code, err } = await filter([FIXTURE], { output: outFile });
+  expect(code).toBe(1);
+  expect(err).toMatch(/ENOENT/);
+  expect(fs.existsSync(outFile)).toBe(false);
+});

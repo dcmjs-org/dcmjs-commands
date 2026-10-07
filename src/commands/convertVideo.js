@@ -17,7 +17,7 @@
 // bypass readFileArrayBuffer.
 
 import fs from "node:fs";
-import { once } from "node:events";
+import { createFileSink } from "../io.js";
 
 /** Random-access reader over an open file, for DicomEventStream.fromVideoStream. */
 async function openFileReader(inputPath) {
@@ -64,21 +64,17 @@ export async function convertMp4ToDicom({
   const { DicomEventStream, StreamingPart10Writer } = dcmjs.eventStream;
 
   const reader = await openFileReader(input);
-  const out = fs.createWriteStream(output);
-  let pending = false;
+  let sink;
+  try {
+    sink = createFileSink(output, { inputPath: input });
+  } catch (err) {
+    await reader.close();
+    throw err;
+  }
   const writer = new StreamingPart10Writer({
-    onChunk: (chunk) => {
-      if (!out.write(chunk)) {
-        pending = true;
-      }
-    },
+    onChunk: (chunk) => sink.write(chunk),
   });
-  writer.setDrain(async () => {
-    if (pending) {
-      pending = false;
-      await once(out, "drain");
-    }
-  });
+  writer.setDrain(() => sink.drain());
 
   try {
     const events = DicomEventStream.fromVideoStream(reader, {
@@ -86,11 +82,9 @@ export async function convertMp4ToDicom({
       fragmentBytes,
     });
     await events.process(writer);
-    out.end();
-    await once(out, "finish");
+    await sink.finish();
   } catch (err) {
-    out.destroy();
-    fs.rmSync(output, { force: true });
+    sink.abort();
     throw err;
   } finally {
     await reader.close();
@@ -119,8 +113,7 @@ const TOTAL_LENGTH_TAG = "7FE00003";
 export async function convertDicomToMp4({ dcmjs, input, output, stderr }) {
   const { fromPart10Stream, EventStreamListener } = dcmjs.eventStream;
 
-  const out = fs.createWriteStream(output);
-  let pending = false;
+  const sink = createFileSink(output, { inputPath: input });
 
   class ExtractVideoListener extends EventStreamListener {
     constructor() {
@@ -211,11 +204,7 @@ export async function convertDicomToMp4({ dcmjs, input, output, stderr }) {
           ? bytes.subarray(0, Number(remaining))
           : bytes;
       this.written += take.byteLength;
-      if (
-        !out.write(Buffer.from(take.buffer, take.byteOffset, take.byteLength))
-      ) {
-        pending = true;
-      }
+      sink.write(Buffer.from(take.buffer, take.byteOffset, take.byteLength));
     }
 
     _baseEndBinary() {
@@ -226,31 +215,22 @@ export async function convertDicomToMp4({ dcmjs, input, output, stderr }) {
   }
 
   const listener = new ExtractVideoListener();
-  listener.setDrain(async () => {
-    if (pending) {
-      pending = false;
-      await once(out, "drain");
-    }
-  });
+  listener.setDrain(() => sink.drain());
 
   try {
     await fromPart10Stream(
       fs.createReadStream(input, { highWaterMark: 8 * 1024 * 1024 }),
       listener
     );
-    out.end();
-    await once(out, "finish");
+    if (!listener.sawPixelData) {
+      throw new Error(
+        "no encapsulated PixelData found — the instance carries no video stream"
+      );
+    }
+    await sink.finish();
   } catch (err) {
-    out.destroy();
-    fs.rmSync(output, { force: true });
+    sink.abort();
     throw err;
-  }
-
-  if (!listener.sawPixelData) {
-    fs.rmSync(output, { force: true });
-    throw new Error(
-      "no encapsulated PixelData found — the instance carries no video stream"
-    );
   }
   if (listener.declaredTotal === null) {
     stderr(

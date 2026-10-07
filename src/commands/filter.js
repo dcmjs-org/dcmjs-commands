@@ -19,8 +19,8 @@
 // contract — keep private state in module scope if you chain several filters.
 
 import fs from "node:fs";
-import { once } from "node:events";
 import { pathToFileURL } from "node:url";
+import { createFileSink } from "../io.js";
 import { makeFhirPatientFilter } from "../filters/fhirPatient.js";
 
 export const filterUsage = `usage: dcmjs filter <in.dcm> -o <out.dcm> [options]
@@ -216,41 +216,31 @@ export async function runFilter({
     return 1;
   }
 
-  const out = fs.createWriteStream(outFile);
-  let pending = false;
+  let sink;
+  try {
+    sink = createFileSink(outFile, { inputPath: inFile });
+  } catch (e) {
+    stderr(`dcmjs filter: ${e.message}`);
+    return 1;
+  }
   const writer = new StreamingPart10Writer(
-    {
-      onChunk: (chunk) => {
-        if (!out.write(chunk)) {
-          pending = true;
-        }
-      },
-    },
+    { onChunk: (chunk) => sink.write(chunk) },
     ...filters
   );
-  writer.setDrain(async () => {
-    if (pending) {
-      pending = false;
-      await once(out, "drain");
-    }
-  });
+  writer.setDrain(() => sink.drain());
 
   try {
     const input = fs.createReadStream(inFile, {
       highWaterMark: 8 * 1024 * 1024,
     });
     await fromPart10Stream(input, writer);
-    out.end();
-    await once(out, "finish");
+    if (!writer.done) {
+      throw new Error("input ended before the dataset completed");
+    }
+    await sink.finish();
   } catch (e) {
-    out.destroy();
-    fs.rmSync(outFile, { force: true });
+    sink.abort();
     stderr(`dcmjs filter: ${e.message}`);
-    return 1;
-  }
-
-  if (!writer.done) {
-    stderr("dcmjs filter: input ended before the dataset completed");
     return 1;
   }
   stdout(
