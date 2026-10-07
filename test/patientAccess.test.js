@@ -377,3 +377,96 @@ describe("cli wiring", () => {
     expect(out.lines.join("\n")).toMatch(/--paste-code/);
   });
 });
+
+describe("endpoint policy (the token only goes where it belongs)", () => {
+  function bundleWithEndpoint(address) {
+    return {
+      resourceType: "Bundle",
+      entry: [
+        {
+          resource: {
+            resourceType: "ImagingStudy",
+            id: "s1",
+            identifier: [{ system: "urn:dicom:uid", value: "urn:oid:1.2.3" }],
+            endpoint: [{ reference: "#e" }],
+            contained: [
+              {
+                resourceType: "Endpoint",
+                id: "e",
+                connectionType: { code: "dicom-wado-rs" },
+                address,
+              },
+            ],
+          },
+        },
+      ],
+    };
+  }
+
+  function makeFakes() {
+    const calls = { created: [] };
+    const createAccess = async (url, options) => {
+      calls.created.push({ url, options });
+      return options?.isDestination
+        ? { store: async () => {} }
+        : { queryStudy: async (uid) => ({ uid, childrenMap: new Map() }) };
+    };
+    return { calls, createAccess };
+  }
+
+  const baseValues = {
+    "imaging-url": "https://img.example/fhir",
+    token: "tok",
+    patient: "p1",
+    output: "/tmp/pa-out",
+  };
+
+  test("an http endpoint is refused before any retrieval", async () => {
+    mockGlobalFetch([
+      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("http://img.example/wado"))],
+    ]);
+    const { calls, createAccess } = makeFakes();
+    const { code, err } = await run(baseValues, { createAccess });
+    expect(code).toBe(1);
+    expect(err).toMatch(/not https.*clear text/s);
+    expect(calls.created).toHaveLength(0);
+  });
+
+  test("a cross-origin endpoint is refused, naming the flag", async () => {
+    mockGlobalFetch([
+      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("https://evil.example/wado"))],
+    ]);
+    const { calls, createAccess } = makeFakes();
+    const { code, err } = await run(baseValues, { createAccess });
+    expect(code).toBe(1);
+    expect(err).toMatch(/different origin.*--allow-cross-origin-endpoints/s);
+    expect(calls.created).toHaveLength(0);
+  });
+
+  test("--allow-cross-origin-endpoints proceeds with a warning", async () => {
+    mockGlobalFetch([
+      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("https://other.example/wado"))],
+    ]);
+    const { calls, createAccess } = makeFakes();
+    const { code, err } = await run(
+      { ...baseValues, "allow-cross-origin-endpoints": true },
+      { createAccess }
+    );
+    expect(code).toBe(0);
+    expect(err).toMatch(/warning: sending the access token to the cross-origin endpoint https:\/\/other\.example/);
+    expect(calls.created.length).toBeGreaterThan(0);
+  });
+
+  test("an http loopback endpoint is allowed (local dev servers)", async () => {
+    mockGlobalFetch([
+      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("http://127.0.0.1:5000/wado"))],
+    ]);
+    const { createAccess } = makeFakes();
+    const { code, err } = await run(
+      { ...baseValues, "allow-cross-origin-endpoints": true },
+      { createAccess }
+    );
+    expect(code).toBe(0);
+    expect(err).not.toMatch(/not https/);
+  });
+});

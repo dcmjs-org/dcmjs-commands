@@ -61,12 +61,65 @@ study over WADO-RS with the same Bearer token.
                             Static-DICOMweb tree)
     --fhir                  also write the FHIR layer under <output>/fhir
     --dry-run               stop after listing studies and endpoints
+    --allow-cross-origin-endpoints
+                            permit retrieval from study Endpoints on a
+                            different origin than the discovered servers
+                            (the access token is sent there; off by default)
 `;
 
 const FORMATS = {
   dicomweb: () => DicomAccess.DICOMWEB_OPTIONS,
   part10: () => DicomAccess.PART10_OPTIONS,
 };
+
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Gate every study Endpoint address before the Bearer token goes near it:
+ * the URL must parse, must be https (loopback hostnames exempt, for local
+ * development servers), and must share an origin with the servers this
+ * run actually authorized against — unless --allow-cross-origin-endpoints
+ * explicitly widens the trust, in which case a warning names the host.
+ * A server-supplied http:// or third-party address would otherwise leak
+ * the patient's access token.
+ * @throws {Error} when the endpoint must not receive the token
+ */
+export function assertEndpointAllowed(
+  wadoBase,
+  { trustedOrigins, allowCrossOrigin = false, stderr }
+) {
+  let url;
+  try {
+    url = new URL(wadoBase);
+  } catch {
+    throw new Error(
+      `study Endpoint address "${wadoBase}" is not a valid URL — ` +
+        `refusing to send the access token to it`
+    );
+  }
+  const isLoopback = LOOPBACK_HOSTNAMES.has(url.hostname);
+  if (url.protocol !== "https:" && !isLoopback) {
+    throw new Error(
+      `study Endpoint address ${wadoBase} is not https — the access ` +
+        `token would travel in clear text; refusing to retrieve from it`
+    );
+  }
+  if (!trustedOrigins.has(url.origin)) {
+    if (!allowCrossOrigin) {
+      throw new Error(
+        `study Endpoint address ${wadoBase} is on a different origin ` +
+          `than the servers this run authorized against ` +
+          `(${[...trustedOrigins].join(", ")}) — the access token would ` +
+          `go to a third party; pass --allow-cross-origin-endpoints to ` +
+          `permit it`
+      );
+    }
+    stderr(
+      `patient-access: warning: sending the access token to the ` +
+        `cross-origin endpoint ${url.origin} (--allow-cross-origin-endpoints)`
+    );
+  }
+}
 
 /** Best-effort `open`/`xdg-open`; the printed URL is the real interface. */
 function defaultOpenBrowser(url) {
@@ -308,7 +361,24 @@ export async function runPatientAccess({
       return 0;
     }
 
-    // 4. Retrieve each study over WADO-RS with the same Bearer token.
+    // 4. Retrieve each study over WADO-RS with the same Bearer token —
+    //    but first gate every Endpoint address, before anything is
+    //    written or any token is sent.
+    const trustedOrigins = new Set();
+    for (const base of [imagingBase, fhirUrl]) {
+      try {
+        trustedOrigins.add(new URL(base).origin);
+      } catch {
+        // absent or non-URL base; the other one carries the trust
+      }
+    }
+    for (const { wadoBase } of studies) {
+      assertEndpointAllowed(wadoBase, {
+        trustedOrigins,
+        allowCrossOrigin: Boolean(values["allow-cross-origin-endpoints"]),
+        stderr,
+      });
+    }
     const destination = await createAccess(values.output, {
       scheme: "file",
       isDestination: true,
