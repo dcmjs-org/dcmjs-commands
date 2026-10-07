@@ -33,7 +33,7 @@ Four bins ship with the package:
 
 | Bin          | Purpose                                                                                                                                              |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb — plus patient-access (SMART Imaging Access retrieval) |
+| `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb, transcode, wsiresize — plus patient-access (SMART Imaging Access retrieval) |
 | `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                               |
 | `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                   |
 | `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                            |
@@ -225,6 +225,40 @@ Patient; if it disagrees with the instance tags you get a warning (run
 `dcmjs filter --fhir-patient` first when the instances should match).
 `--fhir-encounter` embeds an Encounter and references it from
 `ImagingStudy.encounter`.
+
+### transcode
+
+Rewrite the pixel data of DICOM files in another transfer syntax, one
+frame at a time, so file size does not matter. Files are replaced in place
+unless `-d` names an output directory. JPEG Baseline whole-slide images
+recompress losslessly to JPEG XL (`jxl-jpeg`, 1.2.840.10008.1.2.4.111),
+and `--to jpeg` gives back the same JPEG bytes. Lossy targets need
+`--lossy` and get a new SOPInstanceUID. The command prints instances,
+frames, header bytes and image bytes before and after.
+
+```bash
+dcmjs transcode ./slides --to jxl-jpeg              # in place, lossless
+dcmjs transcode ./slides --to jpeg -d ./restored    # back to the JPEG frames
+dcmjs transcode ./ct --to jxl-lossless -d ./ct-jxl
+```
+
+### wsiresize
+
+Rebuild a whole-slide pyramid from its base level with a new tile size,
+level factor and codec. Presets: `jxl-high` (default, JPEG XL distance 1),
+`jxl-medium`, `jxl-low`, `jxl-lossless` — all 1024 x 1024 tiles, factor 4,
+progressive — and `jpeg-512`. `-d` writes a new series; `--in-place` keeps
+the base level's SOPInstanceUID and the SeriesInstanceUID, so references to
+the base level (for example bulk annotations) stay valid, and deletes the
+old lower levels.
+
+```bash
+dcmjs wsiresize ./slide --dry-run                   # print the planned levels
+dcmjs wsiresize ./slide -d ./resized --preset jxl-medium
+dcmjs wsiresize ./slide --in-place --preset jxl-high --tile 512
+```
+
+See [docs/specs/transcode-and-wsiresize.md](docs/specs/transcode-and-wsiresize.md).
 
 ### patient-access
 
