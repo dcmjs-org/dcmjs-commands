@@ -20,6 +20,7 @@ import {
   patientAccessUsage,
 } from "./commands/patientAccess.js";
 import { runTranscode, transcodeUsage } from "./commands/transcode.js";
+import { runWsiResize, wsiResizeUsage } from "./commands/wsiresize.js";
 
 export const usage = `usage: dcmjs <command> [options]
 
@@ -33,6 +34,7 @@ Commands:
     dicomdir    build a DICOMDIR indexing a directory of DICOM files
     dicomweb    publish a directory of DICOM files as a Static-DICOMweb tree
     transcode   rewrite pixel data in another transfer syntax, frame by frame
+    wsiresize   rebuild a whole-slide image pyramid (tile size, levels, codec)
     patient-access
                 fetch a patient's imaging studies via SMART Imaging Access
                 (FHIR discovery → App Launch → WADO-RS retrieval)
@@ -152,6 +154,25 @@ const COMMANDS = {
       distance: { type: "string" },
       effort: { type: "string" },
       progressive: { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false },
+      json: { type: "boolean", default: false },
+      help: { type: "boolean", short: "h", default: false },
+    },
+  },
+  wsiresize: {
+    run: runWsiResize,
+    usage: wsiResizeUsage,
+    options: {
+      directory: { type: "string", short: "d" },
+      "in-place": { type: "boolean", default: false },
+      preset: { type: "string", short: "p" },
+      to: { type: "string", short: "t" },
+      tile: { type: "string" },
+      factor: { type: "string" },
+      quality: { type: "string" },
+      distance: { type: "string" },
+      effort: { type: "string" },
+      "no-progressive": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
