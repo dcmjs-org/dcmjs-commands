@@ -19,6 +19,7 @@ import {
   runPatientAccess,
   patientAccessUsage,
 } from "./commands/patientAccess.js";
+import { runTranscode, transcodeUsage } from "./commands/transcode.js";
 
 export const usage = `usage: dcmjs <command> [options]
 
@@ -31,6 +32,7 @@ Commands:
     validate    parse files/directories and report failures
     dicomdir    build a DICOMDIR indexing a directory of DICOM files
     dicomweb    publish a directory of DICOM files as a Static-DICOMweb tree
+    transcode   rewrite pixel data in another transfer syntax, frame by frame
     patient-access
                 fetch a patient's imaging studies via SMART Imaging Access
                 (FHIR discovery → App Launch → WADO-RS retrieval)
@@ -135,6 +137,23 @@ const COMMANDS = {
       verbose: { type: "boolean", default: false },
       debug: { type: "boolean", default: false },
       quiet: { type: "boolean", default: false },
+      help: { type: "boolean", short: "h", default: false },
+    },
+  },
+  transcode: {
+    run: runTranscode,
+    usage: transcodeUsage,
+    options: {
+      to: { type: "string", short: "t" },
+      directory: { type: "string", short: "d" },
+      lossy: { type: "boolean", default: false },
+      lossless: { type: "boolean", default: false },
+      quality: { type: "string" },
+      distance: { type: "string" },
+      effort: { type: "string" },
+      progressive: { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false },
+      json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   },
