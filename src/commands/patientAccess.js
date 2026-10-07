@@ -19,6 +19,7 @@ import {
 import {
   DEFAULT_REDIRECT_PORT,
   REDIRECT_PATH,
+  assertStateMatches,
   buildAuthorizationUrl,
   exchangeCodeForToken,
   generatePkce,
@@ -178,14 +179,11 @@ async function authorize({
     stdout(`patient-access: waiting for the redirect on ${redirectUri} ...`);
     redirect = await listen({ port });
   }
-  if (redirect.state && redirect.state !== state) {
-    throw new Error(
-      `the redirect's state parameter does not match this run's — the ` +
-        `response belongs to a different (or forged) authorization ` +
-        `attempt and its code cannot be trusted; re-run and use the ` +
-        `freshly printed URL`
-    );
-  }
+  assertStateMatches({
+    redirect,
+    state,
+    pasteCode: Boolean(values["paste-code"]),
+  });
 
   const token = await exchangeCodeForToken({
     tokenEndpoint: token_endpoint,

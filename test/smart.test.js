@@ -13,6 +13,7 @@ import {
   findImagingEndpoint,
 } from "../src/smart/discovery.js";
 import {
+  assertStateMatches,
   buildAuthorizationUrl,
   exchangeCodeForToken,
   generatePkce,
@@ -496,5 +497,41 @@ describe("searchImagingStudies", () => {
         fetchFn,
       })
     ).rejects.toThrow(/OperationOutcome.*--imaging-url/s);
+  });
+});
+
+describe("assertStateMatches", () => {
+  const state = "st-run";
+
+  test("exact match passes", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "c", state }, state })
+    ).not.toThrow();
+  });
+
+  test("a loopback redirect with no state is rejected", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "ATTACKER" }, state })
+    ).toThrow(/carried no state parameter/);
+  });
+
+  test("a mismatched state is rejected", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "c", state: "other" }, state })
+    ).toThrow(/does not match this run's/);
+  });
+
+  test("a bare pasted code without state is accepted only for --paste-code", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "c" }, state, pasteCode: true })
+    ).not.toThrow();
+    // but a pasted redirect that DOES carry a wrong state still fails
+    expect(() =>
+      assertStateMatches({
+        redirect: { code: "c", state: "other" },
+        state,
+        pasteCode: true,
+      })
+    ).toThrow(/does not match this run's/);
   });
 });
