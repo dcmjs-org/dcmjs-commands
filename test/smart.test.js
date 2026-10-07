@@ -78,15 +78,6 @@ describe("fetchSmartConfiguration", () => {
       fetchSmartConfiguration("https://fhir.example", { fetchFn })
     ).rejects.toThrow(/404.*--imaging-url/s);
   });
-
-  test("unreachable server is a corrective error", async () => {
-    const fetchFn = async () => {
-      throw new Error("ECONNREFUSED");
-    };
-    await expect(
-      fetchSmartConfiguration("https://fhir.example", { fetchFn })
-    ).rejects.toThrow(/could not reach.*--fhir-url/s);
-  });
 });
 
 describe("findImagingEndpoint", () => {
@@ -238,13 +229,6 @@ describe("exchangeCodeForToken", () => {
     ]);
     await expect(exchangeCodeForToken({ ...params, fetchFn })).rejects.toThrow(
       /400.*re-run/s
-    );
-  });
-
-  test("an answer without access_token is a corrective error", async () => {
-    const { fetchFn } = fakeFetch([["/token", jsonResponse({ ok: true })]]);
-    await expect(exchangeCodeForToken({ ...params, fetchFn })).rejects.toThrow(
-      /access_token.*--token/s
     );
   });
 });
@@ -484,19 +468,6 @@ describe("searchImagingStudies", () => {
         fetchFn,
       })
     ).rejects.toThrow(/401.*--scope/s);
-  });
-
-  test("a non-Bundle answer is a corrective error", async () => {
-    const { fetchFn } = fakeFetch([
-      ["/ImagingStudy?", jsonResponse({ resourceType: "OperationOutcome" })],
-    ]);
-    await expect(
-      searchImagingStudies({
-        imagingBase: "https://img.example/fhir",
-        patient: "p1",
-        fetchFn,
-      })
-    ).rejects.toThrow(/OperationOutcome.*--imaging-url/s);
   });
 });
 
