@@ -28,18 +28,19 @@ export const commandsLog = dcmjsLog.getLogger("commands");
 /** Dicom issue log is for reporting inconsistencies and issues with DICOM logging */
 export const dicomIssueLog = getLogger("dicom", "issue");
 
-export function setOptions(options) {
+export function setOptions(options = {}) {
   if (options.loglevel) {
     loglevel.setLevel(options.loglevel);
   } else if (options.debug) {
-    console.log("Setting loglevel to debug");
     loglevel.setLevel("debug");
-    console.log(
-      "commands level is",
-      loglevel.getLogger("dcmjs", "commands").getLevel(),
-    );
-  } else {
+  } else if (options.verbose) {
     loglevel.setLevel("info");
+  } else if (options.quiet) {
+    loglevel.setLevel("error");
+  } else {
+    // Default is quiet: the per-instance transfer narration is info-level;
+    // command results go to stdout, not the log. --verbose restores it.
+    loglevel.setLevel("warn");
   }
   loglevel.rebuild();
 }

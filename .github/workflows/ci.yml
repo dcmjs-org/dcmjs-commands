@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, modernize]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: dcmjs-commands
+
+      # The dcmjs dependency is file:../dcmjs-integration — check out and
+      # build the sibling fork (the merged 1.0-beta preview) into that path
+      # before npm ci can succeed.
+      - uses: actions/checkout@v4
+        with:
+          repository: awatson1978/dcmjs
+          ref: integration/1.0-beta-preview
+          path: dcmjs-integration
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: dcmjs-commands/package-lock.json
+
+      - name: Build sibling dcmjs
+        working-directory: dcmjs-integration
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm run build
+
+      - name: Install
+        working-directory: dcmjs-commands
+        run: npm ci
+
+      - name: Lint
+        working-directory: dcmjs-commands
+        run: npm run lint
+
+      - name: Format check
+        working-directory: dcmjs-commands
+        run: npm run format:check
+
+      - name: Test
+        working-directory: dcmjs-commands
+        run: npm test
