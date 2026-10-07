@@ -12,7 +12,9 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
   buildFhirLayer,
+  endpointIdForAddress,
   toTransactionBundle,
+  writeFhirLayer,
 } from "../src/fhir/publishFhir.js";
 import { runDicomweb } from "../src/commands/dicomweb.js";
 
@@ -94,7 +96,11 @@ describe("buildFhirLayer", () => {
     expect(study.id).toBe(STUDY_UID);
     expect(study.subject.reference).toBe("Patient/22446688");
     expect(study.subject.display).toContain("JANE");
-    expect(study.endpoint).toEqual([{ reference: "Endpoint/dicomweb" }]);
+    expect(study.endpoint).toEqual([
+      {
+        reference: `Endpoint/${endpointIdForAddress("http://localhost:5000/dicomweb")}`,
+      },
+    ]);
     expect(study.numberOfInstances).toBe(2);
     expect(study.identifier[0].value).toBe(`urn:oid:${STUDY_UID}`);
   });
@@ -231,16 +237,17 @@ describe("dcmjs dicomweb --fhir end to end", () => {
     expect(study.numberOfSeries).toBe(2);
     expect(study.numberOfInstances).toBe(3);
     expect(study.subject.reference).toBe("Patient/22446688");
-    expect(study.endpoint[0].reference).toBe("Endpoint/dicomweb");
+    const endpointId = endpointIdForAddress("https://pacs.example.org/dicomweb");
+    expect(study.endpoint[0].reference).toBe(`Endpoint/${endpointId}`);
 
-    const endpoint = read("Endpoint/dicomweb.json");
+    const endpoint = read(`Endpoint/${endpointId}.json`);
     expect(endpoint.address).toBe("https://pacs.example.org/dicomweb");
 
     const bundle = read("Bundle.json");
     expect(bundle.type).toBe("transaction");
     const urls = bundle.entry.map((e) => e.request.url).sort();
     expect(urls).toEqual([
-      "Endpoint/dicomweb",
+      `Endpoint/${endpointId}`,
       `ImagingStudy/${STUDY_UID}`,
       "Patient/22446688",
     ]);
@@ -260,5 +267,57 @@ describe("dcmjs dicomweb --fhir end to end", () => {
     const files = fs.readdirSync(path.join(dest, "fhir", "Patient"));
     expect(files).toHaveLength(1); // derived from whatever the fixture carries
     expect(fs.existsSync(path.join(dest, "fhir", "Bundle.json"))).toBe(true);
+  });
+});
+
+describe("multi-study, multi-endpoint layers", () => {
+  test("two studies on different WADO bases keep distinct Endpoints", () => {
+    const os = require("node:os");
+    const dest = fs.mkdtempSync(path.join(os.tmpdir(), "dcmjs-fhir-multi-"));
+    try {
+      const layerA = buildFhirLayer({
+        naturals: [natural()],
+        wadoRoot: "https://server-a.example/wado",
+      });
+      const layerB = buildFhirLayer({
+        naturals: [
+          natural({
+            StudyInstanceUID: "2.25.777.2",
+            SOPInstanceUID: "2.25.777.2.1",
+          }),
+        ],
+        wadoRoot: "https://server-b.example/wado",
+      });
+      writeFhirLayer(dest, layerA);
+      writeFhirLayer(dest, layerB);
+
+      const idA = endpointIdForAddress("https://server-a.example/wado");
+      const idB = endpointIdForAddress("https://server-b.example/wado");
+      expect(idA).not.toBe(idB);
+      const endpoints = fs.readdirSync(path.join(dest, "fhir", "Endpoint")).sort();
+      expect(endpoints).toEqual([`${idA}.json`, `${idB}.json`].sort());
+
+      const read = (p2) =>
+        JSON.parse(fs.readFileSync(path.join(dest, "fhir", p2), "utf8"));
+      expect(read(`Endpoint/${idA}.json`).address).toBe(
+        "https://server-a.example/wado"
+      );
+      expect(read(`Endpoint/${idB}.json`).address).toBe(
+        "https://server-b.example/wado"
+      );
+      // each study still points at its own server
+      expect(read(`ImagingStudy/${STUDY_UID}.json`).endpoint[0].reference).toBe(
+        `Endpoint/${idA}`
+      );
+      expect(read("ImagingStudy/2.25.777.2.json").endpoint[0].reference).toBe(
+        `Endpoint/${idB}`
+      );
+      const bundleUrls = read("Bundle.json").entry.map((e) => e.request.url);
+      expect(bundleUrls).toEqual(
+        expect.arrayContaining([`Endpoint/${idA}`, `Endpoint/${idB}`])
+      );
+    } finally {
+      fs.rmSync(dest, { recursive: true, force: true });
+    }
   });
 });
