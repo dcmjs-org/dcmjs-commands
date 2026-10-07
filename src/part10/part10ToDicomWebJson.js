@@ -2,24 +2,16 @@
 //
 // Pure converters behind the Part 10 directory source: turn a parsed
 // DicomDict into the shapes the Static-DICOMweb destination consumes.
-//
-// The one non-obvious constraint (verified in StaticDicomWebSeries.
-// storeCurrentLevel): the destination writes metadata.gz from the SOURCE
-// instance's jsonData verbatim. So jsonData must carry no ArrayBuffers
-// (they would JSON.stringify to {}), PixelData must already be the
-// "instances/<sop>/frames" BulkDataURI the destination's own rewrite
-// produces, and other binary values must carry the exact hashed bulkdata
-// path the destination will store them under (same SHA-1, computed here
-// with the same getBulkdataInfo helper).
+// The DICOM JSON itself comes from the standard event-stream pair
+// (fromDataSet → DicomWebJsonWriter); dicomWebSanitizeFilter enforces
+// the Static-DICOMweb constraints on the way through.
 
 import dcmjs from "../dcmjsBundle.js";
 import { naturalize } from "../utils/naturalize.js";
-import { getBulkdataInfo } from "../utils/getBulkdataInfo.js";
+import { makeDicomWebSanitizeFilter } from "./dicomWebSanitizeFilter.js";
 
 const { unencapsulatedTransferSyntaxes, videoTransferSyntaxUIDs } =
   dcmjs.constants;
-
-const PIXEL_DATA = "7FE00010";
 
 const TRANSFER_SYNTAX_CONTENT_TYPES = {
   "1.2.840.10008.1.2.4.50": "image/jpeg",
@@ -50,10 +42,6 @@ function isArrayBufferLike(value) {
   );
 }
 
-function isBinaryValue(value) {
-  return isArrayBufferLike(value) || ArrayBuffer.isView(value);
-}
-
 function toExactArrayBuffer(value) {
   if (isArrayBufferLike(value)) {
     return value;
@@ -65,64 +53,17 @@ function toExactArrayBuffer(value) {
 }
 
 /**
- * Sanitize one dict level into JSON-safe DICOM JSON: underscore-prefixed
- * bookkeeping dropped, SQ recursed, PixelData replaced by the frames
- * BulkDataURI, other binary values replaced by hashed bulkdata URIs whose
- * bytes are collected into bulkdataMap (keyed by URI).
- */
-async function sanitizeLevel(dict, sopUID, bulkdataMap, frameInfo) {
-  const json = {};
-  for (const [key, entry] of Object.entries(dict)) {
-    if (key.startsWith("_") || !entry || typeof entry !== "object") {
-      continue;
-    }
-
-    if (key.toUpperCase() === PIXEL_DATA) {
-      frameInfo.valueCount = Array.isArray(entry.Value)
-        ? entry.Value.length
-        : 0;
-      json[PIXEL_DATA] = {
-        vr: entry.vr || "OB",
-        BulkDataURI: `instances/${sopUID}/frames`,
-      };
-      continue;
-    }
-
-    if (entry.vr === "SQ" && Array.isArray(entry.Value)) {
-      const items = [];
-      for (const item of entry.Value) {
-        items.push(await sanitizeLevel(item, sopUID, bulkdataMap, frameInfo));
-      }
-      json[key] = { vr: "SQ", Value: items };
-      continue;
-    }
-
-    const values = Array.isArray(entry.Value) ? entry.Value : [];
-    if (values.some(isBinaryValue)) {
-      // Non-pixel binary (LUTs, ICC profiles, ...): pre-compute the exact
-      // series-relative hashed path the destination will store it under.
-      const buffer = toExactArrayBuffer(values[0]);
-      const { hashCode, extension } = await getBulkdataInfo(key, entry, buffer);
-      const bulkDataURI =
-        `../../bulkdata/${hashCode.substring(0, 3)}/` +
-        `${hashCode.substring(3, 6)}/${hashCode}.${extension}`;
-      bulkdataMap.set(bulkDataURI, buffer);
-      json[key] = { vr: entry.vr, BulkDataURI: bulkDataURI };
-      continue;
-    }
-
-    json[key] = {
-      vr: entry.vr,
-      ...(entry.BulkDataURI
-        ? { BulkDataURI: entry.BulkDataURI }
-        : { Value: structuredClone(values) }),
-    };
-  }
-  return json;
-}
-
-/**
  * Convert one parsed Part 10 file into a source-instance entry.
+ *
+ * The non-obvious constraint this function owns (verified in
+ * StaticDicomWebSeries.storeCurrentLevel): the destination writes
+ * metadata.gz from the returned jsonData VERBATIM. So jsonData must
+ * carry no ArrayBuffers (they would JSON.stringify to {}), PixelData
+ * must already be the "instances/<sop>/frames" BulkDataURI the
+ * destination's own rewrite produces, and every other binary value must
+ * carry the exact hashed bulkdata path the destination will store it
+ * under (same SHA-256 the Static-DICOMweb tools use). The sanitize
+ * filter on the DicomWebJsonWriter enforces all three.
  *
  * @param {Object} dicomDict - DicomMessage.readFile result ({ meta, dict })
  * @param {string} filePath - origin, for re-reads and error messages
@@ -148,12 +89,14 @@ export async function part10ToEntry(dicomDict, filePath) {
     encapsulated: !unencapsulatedTransferSyntaxes[transferSyntaxUID],
     video: videoTransferSyntaxUIDs.has(transferSyntaxUID),
   };
-  const jsonData = await sanitizeLevel(
-    dicomDict.dict,
-    sopUID,
-    bulkdataMap,
-    frameInfo
+  const { DicomEventStream, DicomWebJsonWriter } = dcmjs.eventStream;
+  const writer = new DicomWebJsonWriter(
+    makeDicomWebSanitizeFilter({ sopUID, bulkdataMap, frameInfo })
   );
+  // dict only — meta would be written flat alongside the dataset, and
+  // metadata.gz carries the dataset alone.
+  await DicomEventStream.fromDataSet({ dict: dicomDict.dict }).process(writer);
+  const jsonData = writer.result;
 
   // Naturalize the SANITIZED json (never the raw dict): natural objects
   // end up stringified into the series-natural query file.

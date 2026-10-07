@@ -14,4 +14,12 @@ export async function getBulkdataInfo(key, child, bulkdata) {
   return { contentType, hashCode, extension: "mht" };
 }
 
+/** The series-relative bulkdata URI for a hash: ../../bulkdata/aaa/bbb/<hash>.<ext> */
+export function bulkdataUriFor(hashCode, extension = "mht") {
+  return (
+    `../../bulkdata/${hashCode.substring(0, 3)}/` +
+    `${hashCode.substring(3, 6)}/${hashCode}.${extension}`
+  );
+}
+
 export default getBulkdataInfo;
