@@ -222,7 +222,9 @@ describe("output location and resilience (review fixes)", () => {
   });
 
   test("-o outside the tree is refused with a corrective error", async () => {
-    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "dcmjs-elsewhere-"));
+    const elsewhere = fs.mkdtempSync(
+      path.join(os.tmpdir(), "dcmjs-elsewhere-")
+    );
     try {
       const { code, err } = await dicomdir([tree], {
         output: path.join(elsewhere, "DICOMDIR"),

@@ -423,7 +423,10 @@ describe("endpoint policy (the token only goes where it belongs)", () => {
 
   test("an http endpoint is refused before any retrieval", async () => {
     mockGlobalFetch([
-      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("http://img.example/wado"))],
+      [
+        "/ImagingStudy?",
+        jsonResponse(bundleWithEndpoint("http://img.example/wado")),
+      ],
     ]);
     const { calls, createAccess } = makeFakes();
     const { code, err } = await run(baseValues, { createAccess });
@@ -434,7 +437,10 @@ describe("endpoint policy (the token only goes where it belongs)", () => {
 
   test("a cross-origin endpoint is refused, naming the flag", async () => {
     mockGlobalFetch([
-      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("https://evil.example/wado"))],
+      [
+        "/ImagingStudy?",
+        jsonResponse(bundleWithEndpoint("https://evil.example/wado")),
+      ],
     ]);
     const { calls, createAccess } = makeFakes();
     const { code, err } = await run(baseValues, { createAccess });
@@ -445,7 +451,10 @@ describe("endpoint policy (the token only goes where it belongs)", () => {
 
   test("--allow-cross-origin-endpoints proceeds with a warning", async () => {
     mockGlobalFetch([
-      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("https://other.example/wado"))],
+      [
+        "/ImagingStudy?",
+        jsonResponse(bundleWithEndpoint("https://other.example/wado")),
+      ],
     ]);
     const { calls, createAccess } = makeFakes();
     const { code, err } = await run(
@@ -453,13 +462,18 @@ describe("endpoint policy (the token only goes where it belongs)", () => {
       { createAccess }
     );
     expect(code).toBe(0);
-    expect(err).toMatch(/warning: sending the access token to the cross-origin endpoint https:\/\/other\.example/);
+    expect(err).toMatch(
+      /warning: sending the access token to the cross-origin endpoint https:\/\/other\.example/
+    );
     expect(calls.created.length).toBeGreaterThan(0);
   });
 
   test("an http loopback endpoint is allowed (local dev servers)", async () => {
     mockGlobalFetch([
-      ["/ImagingStudy?", jsonResponse(bundleWithEndpoint("http://127.0.0.1:5000/wado"))],
+      [
+        "/ImagingStudy?",
+        jsonResponse(bundleWithEndpoint("http://127.0.0.1:5000/wado")),
+      ],
     ]);
     const { createAccess } = makeFakes();
     const { code, err } = await run(

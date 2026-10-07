@@ -237,7 +237,9 @@ describe("dcmjs dicomweb --fhir end to end", () => {
     expect(study.numberOfSeries).toBe(2);
     expect(study.numberOfInstances).toBe(3);
     expect(study.subject.reference).toBe("Patient/22446688");
-    const endpointId = endpointIdForAddress("https://pacs.example.org/dicomweb");
+    const endpointId = endpointIdForAddress(
+      "https://pacs.example.org/dicomweb"
+    );
     expect(study.endpoint[0].reference).toBe(`Endpoint/${endpointId}`);
 
     const endpoint = read(`Endpoint/${endpointId}.json`);
@@ -294,7 +296,9 @@ describe("multi-study, multi-endpoint layers", () => {
       const idA = endpointIdForAddress("https://server-a.example/wado");
       const idB = endpointIdForAddress("https://server-b.example/wado");
       expect(idA).not.toBe(idB);
-      const endpoints = fs.readdirSync(path.join(dest, "fhir", "Endpoint")).sort();
+      const endpoints = fs
+        .readdirSync(path.join(dest, "fhir", "Endpoint"))
+        .sort();
       expect(endpoints).toEqual([`${idA}.json`, `${idB}.json`].sort());
 
       const read = (p2) =>

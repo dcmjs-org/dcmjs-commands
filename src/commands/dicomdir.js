@@ -149,7 +149,9 @@ export async function runDicomdir({
         const reason = result.skipped.missing
           ? `missing ${result.skipped.missing.join(", ")}`
           : `unreadable as DICOM (${result.skipped.error})`;
-        stderr(`dicomdir: warning: skipping ${result.skipped.file} — ${reason}`);
+        stderr(
+          `dicomdir: warning: skipping ${result.skipped.file} — ${reason}`
+        );
       } else {
         entries.push(result.entry);
       }

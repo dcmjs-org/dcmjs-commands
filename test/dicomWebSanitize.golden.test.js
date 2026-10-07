@@ -126,8 +126,9 @@ test("event-stream sanitize matches the previous implementation on the fixture",
     [...refMap.keys()].sort()
   );
   for (const [uri, bytes] of refMap) {
-    expect(Buffer.from(entry.bulkdataMap.get(uri)).equals(Buffer.from(bytes)))
-      .toBe(true);
+    expect(
+      Buffer.from(entry.bulkdataMap.get(uri)).equals(Buffer.from(bytes))
+    ).toBe(true);
   }
 
   // Frame bookkeeping unchanged.
