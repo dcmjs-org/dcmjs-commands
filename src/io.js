@@ -6,6 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { once } from "node:events";
 
 /**
  * Node Buffer (possibly a view into the shared read pool) → exact
@@ -138,6 +139,76 @@ export function writeOutput({ output, data, stdout }) {
   }
   stdout(data);
   return null;
+}
+
+/**
+ * Backpressured file sink for event-stream writers — the one place that
+ * owns the write-stream lifecycle for file-producing commands.
+ *
+ * A write-stream 'error' (missing directory, full disk, EACCES) is captured
+ * and re-thrown from the next write()/drain()/finish() call, so it surfaces
+ * through the caller's try/catch instead of crashing the process as an
+ * unhandled 'error' event. abort() tears down the stream and removes the
+ * partial output file; every failure path must funnel through it so no
+ * truncated-but-valid-looking Part 10 file survives on disk.
+ *
+ * @param {string} outPath
+ * @param {{inputPath?: string}} [opts] throws before creating the stream
+ *   when outPath resolves to the same file as inputPath — an in-place
+ *   rewrite would truncate the input before it is read.
+ * @returns {{ write(chunk: Buffer|Uint8Array): void,
+ *             drain(): Promise<void>,
+ *             finish(): Promise<void>,
+ *             abort(): void }}
+ */
+export function createFileSink(outPath, { inputPath } = {}) {
+  if (
+    inputPath !== undefined &&
+    path.resolve(outPath) === path.resolve(inputPath)
+  ) {
+    throw new Error("refusing to overwrite the input file in place");
+  }
+  const stream = fs.createWriteStream(outPath);
+  let error = null;
+  let pending = false;
+  let rejectFailed;
+  const failed = new Promise((_, reject) => {
+    rejectFailed = reject;
+  });
+  failed.catch(() => {}); // the race below consumes it; never unhandled
+  stream.on("error", (err) => {
+    error = err;
+    rejectFailed(err);
+  });
+  const throwIfFailed = () => {
+    if (error) {
+      throw error;
+    }
+  };
+  return {
+    write(chunk) {
+      throwIfFailed();
+      if (!stream.write(chunk)) {
+        pending = true;
+      }
+    },
+    async drain() {
+      throwIfFailed();
+      if (pending) {
+        pending = false;
+        await Promise.race([once(stream, "drain"), failed]);
+      }
+    },
+    async finish() {
+      throwIfFailed();
+      stream.end();
+      await Promise.race([once(stream, "finish"), failed]);
+    },
+    abort() {
+      stream.destroy();
+      fs.rmSync(outPath, { force: true });
+    },
+  };
 }
 
 /**
