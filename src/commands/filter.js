@@ -20,8 +20,11 @@
 
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import dcmjsBundle from "../dcmjsBundle.js";
 import { createFileSink } from "../io.js";
 import { makeFhirPatientFilter } from "../filters/fhirPatient.js";
+
+const { nameMap } = dcmjsBundle.data.DicomMetaDictionary;
 
 export const filterUsage = `usage: dcmjs filter <in.dcm> -o <out.dcm> [options]
 
@@ -29,9 +32,10 @@ Stream a DICOM file through an event-stream filter chain to a new file.
 
     -o, --output <file>   output Part 10 file (required)
     --set TAG=VALUE       replace the value of every element with this tag
-                          (repeatable; TAG is 8 hex digits, e.g. 00100010)
+                          (repeatable; TAG is 8 hex digits or a DICOM
+                          keyword, e.g. 00100010 or PatientName)
     --drop TAG            remove every element or sequence with this tag
-                          (repeatable)
+                          (repeatable; same TAG forms as --set)
     --fhir-patient <file> apply a FHIR Patient resource to the patient module
                           (insert-or-replace of PatientName/ID/BirthDate/Sex;
                           fields absent from the resource are written empty)
@@ -53,11 +57,19 @@ export function loadFhirPatientAttrs(dcmjs, filePath) {
   return dcmjs.fhir.patientToDataset(resource);
 }
 
-/** Accept 00100010, 0010,0010 or (0010,0010); return canonical 8-hex. */
+/**
+ * Accept 00100010, 0010,0010, (0010,0010), or a DICOM keyword such as
+ * PatientName (via the dictionary's nameMap); return canonical 8-hex.
+ */
 function normalizeTag(text) {
+  if (/^[A-Za-z]/.test(text) && nameMap[text]) {
+    return nameMap[text].tag.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+  }
   const hex = text.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
   if (hex.length !== 8) {
-    throw new Error(`invalid tag "${text}" — expected 8 hex digits`);
+    throw new Error(
+      `invalid tag "${text}" — expected 8 hex digits or a DICOM keyword`
+    );
   }
   return hex;
 }

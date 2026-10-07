@@ -537,13 +537,13 @@ dcmjs filter in.dcm -o copy.dcm
 
 ### Replace values in place: `--set TAG=VALUE`
 
-Repeatable; the tag is 8 hex digits. Multi-valued elements collapse to the
-one replacement.
+Repeatable; the tag is 8 hex digits or a DICOM keyword. Multi-valued
+elements collapse to the one replacement.
 
 ```bash
 # Rename the patient and re-identify the instance in one streaming pass
 dcmjs filter in.dcm -o out.dcm \
-  --set 00100010=RESEARCH^SUBJECT^42 \
+  --set PatientName=RESEARCH^SUBJECT^42 \
   --set 00080018=2.25.107441562676745974564652992770535752833
 ```
 

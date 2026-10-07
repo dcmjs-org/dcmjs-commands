@@ -184,3 +184,25 @@ test("an unwritable output path fails cleanly instead of crashing", async () => 
   expect(err).toMatch(/ENOENT/);
   expect(fs.existsSync(outFile)).toBe(false);
 });
+
+test("--set and --drop accept DICOM keywords", async () => {
+  const outFile = path.join(tmpDir, "keyword.dcm");
+  const { code } = await filter([FIXTURE], {
+    output: outFile,
+    set: ["PatientName=KEYWORD^SET"],
+    drop: ["InstitutionName"],
+  });
+  expect(code).toBe(0);
+  const dict = readDict(outFile).dict;
+  expect(dict["00100010"].Value[0].Alphabetic).toBe("KEYWORD^SET");
+  expect(dict["00080080"]).toBeUndefined();
+});
+
+test("an unknown keyword is a corrective error", async () => {
+  const { code, err } = await filter([FIXTURE], {
+    output: path.join(tmpDir, "never.dcm"),
+    drop: ["NotARealKeyword"],
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/expected 8 hex digits or a DICOM keyword/);
+});
