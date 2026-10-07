@@ -118,7 +118,7 @@ describe("StaticDicomWebInstance.storeBulkdataItem", () => {
       BulkDataURI: "bulkdata/original",
     });
 
-    const hash = nodeCrypto.createHash("sha1").update(payload).digest("hex");
+    const hash = nodeCrypto.createHash("sha256").update(payload).digest("hex");
     expect(relative).toBe(
       `../../bulkdata/${hash.substring(0, 3)}/${hash.substring(3, 6)}/${hash}.mht`
     );
