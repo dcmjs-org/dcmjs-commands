@@ -21,6 +21,7 @@ import {
 import { decodeImage } from "../imaging/decodeImage.js";
 import { extractTagKeyedJson } from "../utils/extractTagKeyedJson.js";
 import { loadFhirPatientAttrs } from "./filter.js";
+import { PATIENT_MODULE } from "../filters/fhirPatient.js";
 import {
   convertMp4ToDicom,
   convertDicomToMp4,
@@ -82,16 +83,9 @@ function pdfOptionsFromValues(values) {
   return options;
 }
 
-const PATIENT_MODULE_TAGS = [
-  { tag: "00100010", vr: "PN", keyword: "PatientName" },
-  { tag: "00100020", vr: "LO", keyword: "PatientID" },
-  { tag: "00100030", vr: "DA", keyword: "PatientBirthDate" },
-  { tag: "00100040", vr: "CS", keyword: "PatientSex" },
-];
-
 /** Insert-or-replace the patient module on a parsed DicomDict. */
 function applyFhirAttrsToDict(dicomDict, fhirAttrs) {
-  for (const { tag, vr, keyword } of PATIENT_MODULE_TAGS) {
+  for (const { tag, vr, keyword } of PATIENT_MODULE) {
     const value = fhirAttrs[keyword];
     dicomDict.upsertTag(tag, vr, value ? [value] : []);
   }
@@ -403,6 +397,16 @@ export async function runConvert({
     if (kind === "dicom" && to === "mp4") {
       if (!values.output) {
         throw new Error("dcm → mp4 produces binary; use -o <file>");
+      }
+      if (fhirAttrs) {
+        // The extracted MP4 carries no DICOM attributes — silently
+        // accepting the flag would let a caller believe the demographics
+        // were applied somewhere.
+        throw new Error(
+          "--fhir-patient does not apply to dcm → mp4 (the extracted MP4 " +
+            "carries no DICOM attributes); apply it to the input with " +
+            "dcmjs filter --fhir-patient instead"
+        );
       }
       return await convertDicomToMp4({
         dcmjs,

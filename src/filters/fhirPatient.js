@@ -11,7 +11,9 @@
 // resolves to for the final filter — synthesized events reach the writer
 // through the same door the passed-through ones do.
 
-const PATIENT_MODULE = [
+/** The patient-module tags the FHIR mapping writes — the one list,
+ *  shared with convert's dict-level insert-or-replace. */
+export const PATIENT_MODULE = [
   { tag: "00100010", vr: "PN", keyword: "PatientName" },
   { tag: "00100020", vr: "LO", keyword: "PatientID" },
   { tag: "00100030", vr: "DA", keyword: "PatientBirthDate" },

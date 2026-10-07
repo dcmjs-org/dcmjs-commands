@@ -266,3 +266,26 @@ describe("video instance JSON output", () => {
     );
   });
 });
+
+test("--fhir-patient on dcm -> mp4 is an explicit error, not a silent no-op", async () => {
+  const patientFile = path.join(dir, "fp.json");
+  fs.writeFileSync(
+    patientFile,
+    JSON.stringify({ resourceType: "Patient", name: [{ family: "X" }] })
+  );
+  const code = await runConvert({
+    dcmjs,
+    positionals: [DICOM_FIXTURE],
+    values: {
+      to: "mp4",
+      output: path.join(dir, "never.mp4"),
+      "fhir-patient": patientFile,
+    },
+    ...io,
+  });
+  expect(code).toBe(1);
+  expect(err.join("\n")).toMatch(
+    /--fhir-patient does not apply to dcm → mp4.*filter --fhir-patient/s
+  );
+  expect(fs.existsSync(path.join(dir, "never.mp4"))).toBe(false);
+});
