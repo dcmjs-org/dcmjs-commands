@@ -55,6 +55,7 @@
     ]
   },
   "dependencies": {
+    "@cornerstonejs/dicom-codec": "file:../codecs-jxl/packages/dicom-codec",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.1.0",
     "dcmjs": "file:../dcmjs-integration",
