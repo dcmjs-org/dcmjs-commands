@@ -7,6 +7,7 @@
 
 import path from "node:path";
 import { readFileArrayBuffer, writeOutput } from "../io.js";
+import { formatElementValue } from "../utils/dumpFormat.js";
 
 export const anonymizeUsage = `usage: dcmjs anonymize <file.dcm> [options]
 
@@ -18,21 +19,7 @@ Strip PHI tags (dcmjs anonymizer defaults) and write a scrubbed copy.
 
 /** One-line preview of a dict entry's value, safe for any VR. */
 function summarizeValue(entry) {
-  const values = entry?.Value;
-  if (!Array.isArray(values) || !values.length) {
-    return "";
-  }
-  const parts = values.map((v) => {
-    if (v instanceof ArrayBuffer || ArrayBuffer.isView(v)) {
-      return `[binary ${v.byteLength} bytes]`;
-    }
-    if (v && typeof v === "object") {
-      return v.Alphabetic || JSON.stringify(v);
-    }
-    return String(v);
-  });
-  const joined = parts.join("\\");
-  return joined.length > 120 ? `${joined.slice(0, 117)}...` : joined;
+  return formatElementValue(entry, { maxLength: 120 });
 }
 
 /** Diff two dicts (before/after cleanTags) into a change list. */

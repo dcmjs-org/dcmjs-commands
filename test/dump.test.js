@@ -31,7 +31,9 @@ async function dump(values) {
   return { code, text: out.lines.join("\n"), err: err.lines.join("\n") };
 }
 
-test("dump default prints tag/VR lines (legacy-compatible)", async () => {
+// The (GGGG,EEEE) format REPLACED the pre-1.0 "key name value" output —
+// it is a breaking output change, not a compatible one.
+test("dump default prints (GGGG,EEEE) VR Keyword tag lines", async () => {
   const { code, text } = await dump({});
   expect(code).toBe(0);
   expect(text).toMatch(/\(0010,0010\)\s+PN\s+PatientName/);

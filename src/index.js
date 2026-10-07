@@ -1,5 +1,6 @@
 import dcmjs from "./dcmjsBundle.js";
 import { readFileArrayBuffer } from "./io.js";
+import { dumpDict } from "./utils/dumpFormat.js";
 
 export * as utils from "./utils/index.js";
 export * as dicomweb from "./dicomweb.js";
@@ -15,77 +16,19 @@ export function readDicom(fileName) {
   return dicomDict;
 }
 
+/**
+ * Print a parsed DicomDict as "(GGGG,EEEE) VR Keyword: value" tag lines,
+ * meta group first — the same shared formatter `dcmjs dump` uses, so
+ * library and CLI output cannot drift apart. Values with a BulkDataURI
+ * or InlineBinary element shape print via their JSON form.
+ */
 export function dumpDicom(dicomDict, options = {}) {
   const stdout = options.stdout || console.log;
+  const dictionary = DicomMetaDictionary.dictionary;
   if (dicomDict.meta) {
-    stdout("Metadata");
-    dumpData(dicomDict.meta, options);
+    dumpDict(dicomDict.meta, { dictionary, stdout });
   }
-  stdout("Data");
-  dumpData(dicomDict.dict, options);
-}
-
-export function dumpData(data, options = {}, indent = "") {
-  const stdout = options.stdout || console.log;
-  if (typeof data !== "object") {
-    return;
-  }
-  const keys = Object.keys(data).sort();
-  for (const key of keys) {
-    const value = data[key];
-    if (!value) {
-      continue;
-    }
-    const { vr } = value;
-    const punctuatedTag = DicomMetaDictionary.punctuateTag(key);
-    const entry = DicomMetaDictionary.dictionary[punctuatedTag];
-    const name = entry?.name || "";
-    if (vr === "SQ") {
-      stdout(indent, key, name);
-      dumpSq(name || key, value, options, indent + "  ");
-      continue;
-    }
-    stdout(indent, key, name, valueToString(value, options));
-  }
-}
-
-export function valueToString(value, _options) {
-  const { Value: values, vr, InlineBinary, BulkDataURI } = value;
-  if (InlineBinary) {
-    return `Inline Binary ${InlineBinary.substring(0, Math.min(InlineBinary.length, 32))}${InlineBinary.length > 31 ? "..." : ""} (${(InlineBinary.length * 3) / 4})`;
-  }
-  if (BulkDataURI) {
-    return `URL ${BulkDataURI}`;
-  }
-  if (!values) {
-    return vr || "";
-  }
-  if (values.length === 0) return "";
-  const [v0] = values;
-  if (v0 instanceof ArrayBuffer) {
-    return `ArrayBuffer of length ${values.length}`;
-  }
-  if (typeof v0 === "object") {
-    return values.map((it) => JSON.stringify(it)).join(", ");
-  }
-  if (!Array.isArray(values)) {
-    return JSON.stringify(values);
-  }
-  return values.map((it) => String(it)).join(", ");
-}
-
-export function dumpSq(tag, value, options = {}, indent) {
-  const stdout = options.stdout || console.log;
-  const { Value: sq } = value;
-  if (sq?.length === undefined) {
-    stdout("Empty SQ");
-    return;
-  }
-  for (let i = 0; i < sq.length; i++) {
-    stdout(indent, "Item #", i + 1);
-    dumpData(sq[i], options, indent + "  ");
-  }
-  stdout(indent, "End of", tag, "with", sq.length, "items");
+  dumpDict(dicomDict.dict, { dictionary, stdout });
 }
 
 export function instanceDicom(dicomDict, options = {}) {
