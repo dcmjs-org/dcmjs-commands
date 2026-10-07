@@ -1,4 +1,4 @@
-// src/io.mjs
+// src/io.js
 //
 // Shared file/byte helpers for the dcmjs CLI. Pure functions plus thin fs
 // wrappers; commands stay testable by injecting stdout/stderr and asserting

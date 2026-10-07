@@ -11,12 +11,6 @@
 // With no filters this is a streaming structural copy — output is valid,
 // semantically equal Part 10 (byte-identical output is a non-goal; see
 // StreamingPart10Writer's encoding notes).
-//
-// Custom filters (--module) follow the established chain shape: an object
-// (or default-exported array of objects) whose methods are
-// `method(next, ...args)` over the event-stream vocabulary. Note that `this`
-// inside filter methods is the shared listener, per the EventStreamListener
-// contract — keep private state in module scope if you chain several filters.
 
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -175,6 +169,14 @@ function makeDropFilter(tags) {
   };
 }
 
+/**
+ * Load custom filters from --module files. Each module's default export
+ * is a filter object (or array of them) whose methods are
+ * `method(next, ...args)` over the event-stream vocabulary. Contract for
+ * authors: `this` inside a filter method is the SHARED listener, per
+ * EventStreamListener — keep private state in module scope when several
+ * filters chain, or they will trample each other's fields.
+ */
 async function loadModuleFilters(files) {
   const filters = [];
   for (const file of files) {

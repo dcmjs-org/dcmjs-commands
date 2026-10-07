@@ -1,4 +1,4 @@
-// src/commands/convert.mjs
+// src/commands/convert.js
 //
 // dcmjs convert <input> --to <format> [options]
 //

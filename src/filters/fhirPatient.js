@@ -5,11 +5,6 @@
 // a DICOM stream. Unlike --set (replace-only), this is insert-or-replace —
 // de-identified files whose patient tags were removed outright still get
 // the full module, emitted at the correct tag-ordered position.
-//
-// The filter MUST be last in the chain: it synthesizes elements by calling
-// the listener's _base* methods directly, which is exactly what `next`
-// resolves to for the final filter — synthesized events reach the writer
-// through the same door the passed-through ones do.
 
 /** The patient-module tags the FHIR mapping writes — the one list,
  *  shared with convert's dict-level insert-or-replace. */
@@ -21,6 +16,13 @@ export const PATIENT_MODULE = [
 ];
 
 /**
+ * Build the demographics filter. It MUST be last in the chain: it
+ * synthesizes elements by calling the listener's _base* methods
+ * directly, which is exactly what `next` resolves to for the final
+ * filter — synthesized events reach the writer through the same door
+ * the passed-through ones do. Placed earlier, its synthesized elements
+ * would skip the filters after it.
+ *
  * @param {Object} attrs - patientToDataset output: all four patient-module
  *   keywords, "" for absent (deterministic overwrite — empties are written
  *   as present-but-empty Type 2 elements, clearing any previous identity)

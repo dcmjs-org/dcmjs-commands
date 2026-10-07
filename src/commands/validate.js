@@ -1,4 +1,4 @@
-// src/commands/validate.mjs
+// src/commands/validate.js
 //
 // dcmjs validate <dir-or-file...> [--quiet] [--json <file>] [--conformance]
 // Parse every discovered DICOM file through the classic read path and

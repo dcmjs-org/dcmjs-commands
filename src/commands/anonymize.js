@@ -1,4 +1,4 @@
-// src/commands/anonymize.mjs
+// src/commands/anonymize.js
 //
 // dcmjs anonymize <file.dcm> [-o out.dcm]
 // anonymizer.cleanTags() over the parsed dict, written back to Part 10.
