@@ -31,7 +31,7 @@ Options:
 const FILE_ID_COMPONENT = /^[A-Z0-9_]{1,8}$/;
 
 /** Partial-parse one Part 10 file into a DICOMDIR entry description. */
-function extractEntry({ dcmjs, filePath, rootDir }) {
+function extractEntry({ dcmjs, filePath }) {
   const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
   const dicomDict = DicomMessage.readFile(readFileArrayBuffer(filePath), {
     untilTag: "7FE00010",
@@ -52,10 +52,8 @@ function extractEntry({ dcmjs, filePath, rootDir }) {
     return { skipped: { file: filePath, missing } };
   }
 
-  const relative = path.relative(rootDir, filePath);
   return {
     entry: {
-      referencedFileID: relative.split(path.sep),
       sopClassUid: dataset.SOPClassUID,
       sopInstanceUid: dataset.SOPInstanceUID,
       transferSyntaxUid: meta.TransferSyntaxUID || "1.2.840.10008.1.2.1",
@@ -118,7 +116,21 @@ export async function runDicomdir({
   }
 
   try {
-    const files = discoverDicomFiles(rootDir);
+    // The output location is decided first because every
+    // ReferencedFileID is resolved by readers relative to the directory
+    // that holds the DICOMDIR file — not relative to the scanned root.
+    const output = path.resolve(
+      values.copy
+        ? path.join(values.copy, "DICOMDIR")
+        : values.output || path.join(rootDir, "DICOMDIR")
+    );
+    const baseDir = path.dirname(output);
+
+    // A DICOMDIR is itself a Part 10 file, so a prior run's output would
+    // be rediscovered as an instance; the index never indexes an index.
+    const files = discoverDicomFiles(rootDir).filter(
+      (f) => path.resolve(f) !== output && path.basename(f) !== "DICOMDIR"
+    );
     if (!files.length) {
       throw new Error(`no DICOM files found under ${rootDir}`);
     }
@@ -126,13 +138,18 @@ export async function runDicomdir({
     const entries = [];
     const skipped = [];
     for (const filePath of files) {
-      const result = extractEntry({ dcmjs, filePath, rootDir });
+      let result;
+      try {
+        result = extractEntry({ dcmjs, filePath });
+      } catch (err) {
+        result = { skipped: { file: filePath, error: err.message } };
+      }
       if (result.skipped) {
         skipped.push(result.skipped);
-        stderr(
-          `dicomdir: warning: skipping ${result.skipped.file} — missing ` +
-            result.skipped.missing.join(", ")
-        );
+        const reason = result.skipped.missing
+          ? `missing ${result.skipped.missing.join(", ")}`
+          : `unreadable as DICOM (${result.skipped.error})`;
+        stderr(`dicomdir: warning: skipping ${result.skipped.file} — ${reason}`);
       } else {
         entries.push(result.entry);
       }
@@ -144,7 +161,6 @@ export async function runDicomdir({
     }
 
     const warnings = [];
-    let output = values.output || path.join(rootDir, "DICOMDIR");
     let allowNonConforming = false;
 
     if (values.copy) {
@@ -168,10 +184,19 @@ export async function runDicomdir({
         }
         entry.referencedFileID = ["DICOM", name];
       });
-      output = path.join(dest, "DICOMDIR");
     } else {
-      // Index in place: keep relative paths, flag non-conformant names.
+      // Index in place: file IDs relative to the DICOMDIR's own
+      // directory, flag non-conformant names.
       for (const entry of entries) {
+        const relative = path.relative(baseDir, entry.sourcePath);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) {
+          throw new Error(
+            `"${entry.sourcePath}" is not under ${baseDir} — a DICOMDIR ` +
+              `can only reference files below its own directory; put -o ` +
+              `inside (or above) the tree, or use --copy`
+          );
+        }
+        entry.referencedFileID = relative.split(path.sep);
         const bad = nonConformingComponents(entry);
         if (bad.length) {
           const message =

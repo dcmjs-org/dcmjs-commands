@@ -192,3 +192,81 @@ test("empty directory is an error", async () => {
   expect(code).toBe(1);
   expect(err.join("\n")).toMatch(/no DICOM files found/);
 });
+
+describe("output location and resilience (review fixes)", () => {
+  let tree;
+  beforeEach(() => {
+    tree = fs.mkdtempSync(path.join(os.tmpdir(), "dcmjs-dicomdir-fix-"));
+    writeInstance(path.join(tree, "DICOM", "IM000001"), {
+      sopUid: "2.25.501",
+      seriesUid: "2.25.50",
+      instanceNumber: 1,
+    });
+    writeInstance(path.join(tree, "DICOM", "IM000002"), {
+      sopUid: "2.25.502",
+      seriesUid: "2.25.50",
+      instanceNumber: 2,
+    });
+  });
+  afterEach(() => {
+    fs.rmSync(tree, { recursive: true, force: true });
+  });
+
+  test("a second run in place excludes the first run's DICOMDIR", async () => {
+    const first = await dicomdir([tree]);
+    expect(first.code).toBe(0);
+    const second = await dicomdir([tree]);
+    expect(second.code).toBe(0);
+    expect(second.out.join("\n")).toMatch(/2 instances/);
+    expect(second.err.join("\n")).not.toMatch(/DICOMDIR/);
+  });
+
+  test("-o outside the tree is refused with a corrective error", async () => {
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "dcmjs-elsewhere-"));
+    try {
+      const { code, err } = await dicomdir([tree], {
+        output: path.join(elsewhere, "DICOMDIR"),
+      });
+      expect(code).toBe(1);
+      expect(err.join("\n")).toMatch(/below its own directory.*--copy/s);
+    } finally {
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  test("-o above the tree prefixes the file IDs with the path down", async () => {
+    const { code } = await dicomdir([path.join(tree, "DICOM")], {
+      output: path.join(tree, "DICOMDIR"),
+      json: true,
+    });
+    expect(code).toBe(0);
+    const payloadRun = await dicomdir([path.join(tree, "DICOM")], {
+      output: path.join(tree, "DICOMDIR"),
+      json: true,
+    });
+    const payload = JSON.parse(payloadRun.out.join("\n"));
+    expect(payload.entries[0].referencedFileID).toEqual(["DICOM", "IM000001"]);
+  });
+
+  test("a corrupt DICM-magic file is skipped with a warning, not fatal", async () => {
+    const bad = Buffer.alloc(200);
+    bad.write("DICM", 128, "ascii"); // magic but no parseable content
+    fs.writeFileSync(path.join(tree, "DICOM", "BADFILE"), bad);
+    const { code, out, err } = await dicomdir([tree]);
+    expect(code).toBe(0);
+    expect(out.join("\n")).toMatch(/2 instances/);
+    expect(err.join("\n")).toMatch(/skipping.*BADFILE.*unreadable as DICOM/s);
+  });
+
+  test("--json reports parse-failure skips alongside missing-UID skips", async () => {
+    const bad = Buffer.alloc(200);
+    bad.write("DICM", 128, "ascii");
+    fs.writeFileSync(path.join(tree, "DICOM", "BADFILE"), bad);
+    const { code, out } = await dicomdir([tree], { json: true });
+    expect(code).toBe(0);
+    const payload = JSON.parse(out.join("\n"));
+    expect(payload.skipped).toHaveLength(1);
+    expect(payload.skipped[0].file).toMatch(/BADFILE/);
+    expect(payload.skipped[0].error).toBeTruthy();
+  });
+});
