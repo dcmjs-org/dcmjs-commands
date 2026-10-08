@@ -416,7 +416,9 @@ async function resizeSeries({
     return report;
   }
   const frameCount = Number(first(base.dict, "00280008") ?? 1);
-  progress?.startFile(base.path, frameCount);
+  progress?.startFile(base.path, frameCount, {
+    tiles: levels.reduce((sum, l) => sum + l.frames, 0),
+  });
 
   const seriesUid = inPlace ? group.uid : dcmjs.data.DicomMetaDictionary.uid();
   const pyramidUid = inPlace
@@ -474,6 +476,7 @@ async function resizeSeries({
       await output.spool.append(
         await encodeFrame(image.data, tileInfo, target.uid, encode)
       );
+      progress?.tile();
     },
   });
   const sourceInfo = imageInfoFromDict(base.dict);
@@ -510,7 +513,12 @@ async function resizeSeries({
     const read = await readPart10Frames({
       dcmjs,
       inputPath: base.path,
-      onFrame: sourceSpool ? (frame) => sourceSpool.append(frame) : addFrame,
+      onFrame: sourceSpool
+        ? async (frame) => {
+            await sourceSpool.append(frame);
+            progress?.spooled();
+          }
+        : addFrame,
     });
     if (sourceSpool) {
       const reader = await sourceSpool.openReader();
