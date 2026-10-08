@@ -20,6 +20,7 @@ import {
   emptyTotals,
   formatSizeReport,
 } from "../pixel/sizeReport.js";
+import { Progress } from "../pixel/progress.js";
 import {
   TileRowAssembler,
   createPyramidBuilder,
@@ -104,6 +105,7 @@ Options:
   --effort <e>            JPEG XL effort 1..9 (default 7)
   --no-progressive        write JPEG XL that is not progressive
   --dry-run               print the planned levels; write nothing
+  -q, --quiet             print no progress (the report is still printed)
   --json                  print the report as JSON
   -h, --help              show this help
 `;
@@ -376,6 +378,7 @@ async function resizeSeries({
   outDir,
   inPlace,
   dryRun,
+  progress,
 }) {
   const { base } = group;
   checkBase(base);
@@ -412,6 +415,8 @@ async function resizeSeries({
   if (dryRun) {
     return report;
   }
+  const frameCount = Number(first(base.dict, "00280008") ?? 1);
+  progress?.startFile(base.path, frameCount);
 
   const seriesUid = inPlace ? group.uid : dcmjs.data.DicomMetaDictionary.uid();
   const pyramidUid = inPlace
@@ -482,7 +487,6 @@ async function resizeSeries({
     onStrip: (strip) => builder.addRows(strip),
   });
   const position = tilePosition(base.dict);
-  const frameCount = Number(first(base.dict, "00280008") ?? 1);
   const order = rasterOrder(position, frameCount);
   const addFrame = async (frame, i) => {
     const pixels = await decodeFrame(frame, sourceInfo, sourceUid);
@@ -492,6 +496,7 @@ async function resizeSeries({
       x,
       y
     );
+    progress?.frame();
   };
   // Frames out of raster order are spooled as they arrive, then read back
   // in raster order.
@@ -613,6 +618,12 @@ export async function runWsiResize({
 
   const reports = [];
   let failed = 0;
+  const progress = new Progress({
+    command: "wsiresize",
+    totalFiles: groups.length,
+    write: stderr,
+    quiet: values.quiet || dryRun,
+  });
   for (const group of groups) {
     try {
       reports.push(
@@ -623,14 +634,18 @@ export async function runWsiResize({
           outDir: values.directory,
           inPlace,
           dryRun,
+          progress,
         })
       );
     } catch (err) {
       failed++;
       reports.push({ series: group.uid, error: err.message });
       stderr(`dcmjs wsiresize: series ${group.uid}: ${err.message}`);
+    } finally {
+      progress.endFile();
     }
   }
+  progress.flushBatch();
 
   if (values.json) {
     stdout(

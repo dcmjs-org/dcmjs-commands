@@ -234,7 +234,9 @@ unless `-d` names an output directory. JPEG Baseline whole-slide images
 recompress losslessly to JPEG XL (`jxl-jpeg`, 1.2.840.10008.1.2.4.111),
 and `--to jpeg` gives back the same JPEG bytes. Lossy targets need
 `--lossy` and get a new SOPInstanceUID. The command prints instances,
-frames, header bytes and image bytes before and after.
+frames, header bytes and image bytes before and after. Progress goes to
+stderr: a line per large file and its frames, batches for small files;
+`-q` turns it off.
 
 ```bash
 dcmjs transcode ./slides --to jxl-jpeg              # in place, lossless

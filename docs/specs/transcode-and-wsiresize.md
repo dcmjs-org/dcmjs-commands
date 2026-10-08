@@ -43,6 +43,10 @@ rules:
 - **TC-U7.** If the command fails on a file, that file does not change, and no partial file
   stays in the output location.
 - **TC-U8.** `--dry-run` lists the files that the command would change, and writes nothing.
+- **TC-U9.** The command shows its progress on stderr. A file with many frames gets a line
+  when it starts and lines that show how many of its frames are done. Small files are
+  reported in batches. With `-q` or `--quiet`, the command shows no progress. The progress
+  never goes to stdout, so `--json` output stays valid.
 
 ### `dcmjs wsiresize`
 
@@ -64,6 +68,8 @@ rules:
 - **WR-U6.** The pixels of the new base level come from the source base level, at the same
   positions. Each lower level is the level above it, reduced by the factor.
 - **WR-U7.** No source file changes until all new levels are complete.
+- **WR-U8.** The command shows its progress as TC-U9 states, with one series as one file and
+  the frames of its base level as the frames.
 
 ## § Implementation requirements
 
@@ -87,6 +93,10 @@ rules:
   bitstream path of the codec, with no pixel decode.
 - **PX-I6.** Output files go to a temporary file in the target directory, and a rename puts
   each file in its final location.
+- **PX-I7.** `Progress` (`src/pixel/progress.js`) writes lines, not carriage returns, so the
+  output is the same in a terminal and in a log. A file with 500 frames or more gets a start
+  line, a line at each 10% of its frames, and an end line. Smaller files get one line for
+  each batch of 20 files, and one line at the end.
 
 ### `dcmjs transcode`
 

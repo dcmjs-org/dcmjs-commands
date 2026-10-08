@@ -66,6 +66,8 @@ test("jxl-jpeg in place, then jpeg back, gives every JPEG frame byte for byte", 
   const report = JSON.parse(there.text);
   expect(report.before.instances).toBe(3);
   expect(report.after.pixelBytes).toBeLessThan(report.before.pixelBytes);
+  // Progress goes to stderr, so --json output stays parseable.
+  expect(there.err).toBe("transcode: [1-3/3] 3 files, 9 frames");
   const inPlace = path.join(work, "base.dcm");
   expect(
     (await readPart10Header({ dcmjs, inputPath: inPlace })).meta["00020010"]
@@ -96,8 +98,10 @@ test("a lossy target needs --lossy, and the lossy file gets a new SOPInstanceUID
     lossy: true,
     distance: "2",
     directory: outDir,
+    quiet: true,
   });
   expect(lossy.code).toBe(0);
+  expect(lossy.err).toBe("");
   expect(lossy.text).toMatch(/before .*\n.*after/s);
   const file = path.join(outDir, "base.dcm");
   const { dict } = await readPart10Header({ dcmjs, inputPath: file });

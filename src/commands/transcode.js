@@ -31,6 +31,7 @@ import {
   emptyTotals,
   formatSizeReport,
 } from "../pixel/sizeReport.js";
+import { Progress } from "../pixel/progress.js";
 
 export const transcodeUsage = `usage: dcmjs transcode <file-or-directory>... --to <syntax> [options]
 
@@ -55,6 +56,7 @@ Options:
   --effort <e>            JPEG XL effort 1..9 (default 7)
   --progressive           write progressive JPEG XL
   --dry-run               list the files that would change; write nothing
+  -q, --quiet             print no progress (the report is still printed)
   --json                  print the report as JSON
   -h, --help              show this help
 
@@ -136,6 +138,7 @@ export async function transcodeFile({
   allowLossy,
   options,
   dryRun,
+  progress,
 }) {
   let sourceUid;
   let imageInfo;
@@ -169,6 +172,11 @@ export async function transcodeFile({
               "use --to jxl-lossless / --to jxl-jpeg"
           );
         }
+        // Skipped files and dry runs only read, so they count no frames.
+        progress?.startFile(
+          inputPath,
+          skip || dryRun ? 0 : Number(dict["00280008"]?.Value?.[0] ?? 1)
+        );
       },
       onFrame: async (frame) => {
         if (skip || dryRun) {
@@ -180,6 +188,7 @@ export async function transcodeFile({
         await spool.append(
           await transcodeFrame(frame, imageInfo, sourceUid, target.uid, options)
         );
+        progress?.frame();
       },
     });
 
@@ -272,6 +281,12 @@ export async function runTranscode({
   const after = emptyTotals();
   const files = [];
   let failed = 0;
+  const progress = new Progress({
+    command: "transcode",
+    totalFiles: inputs.length,
+    write: stderr,
+    quiet: values.quiet,
+  });
 
   for (const [inputPath, root] of inputs) {
     const outputPath = outDir
@@ -290,6 +305,7 @@ export async function runTranscode({
         allowLossy,
         options,
         dryRun,
+        progress,
       });
       if (result.skipped) {
         if (outDir && !dryRun) {
@@ -318,8 +334,11 @@ export async function runTranscode({
       failed++;
       files.push({ file: inputPath, error: err.message });
       stderr(`dcmjs transcode: ${inputPath}: ${err.message}`);
+    } finally {
+      progress.endFile();
     }
   }
+  progress.flushBatch();
 
   const report = {
     target: target.uid,
