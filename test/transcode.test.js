@@ -83,6 +83,107 @@ test("jxl-jpeg in place, then jpeg back, gives every JPEG frame byte for byte", 
   expect(await first(restored, "00080018")).toBe(wsi.base.sop);
 });
 
+/** A non-image instance in its own series that references `target`. */
+function writeAnnotation(file, target, series) {
+  const { DicomMetaDictionary, DicomDict } = dcmjs.data;
+  const sop = DicomMetaDictionary.uid();
+  const dict = DicomMetaDictionary.denaturalizeDataset({
+    SOPClassUID: "1.2.840.10008.5.1.4.1.1.91.1",
+    SOPInstanceUID: sop,
+    StudyInstanceUID: series.study,
+    SeriesInstanceUID: DicomMetaDictionary.uid(),
+    SeriesDescription: "Annotations",
+    SeriesNumber: 7,
+    Modality: "ANN",
+    ReferencedSeriesSequence: [
+      {
+        SeriesInstanceUID: series.uid,
+        ReferencedInstanceSequence: [
+          {
+            ReferencedSOPClassUID: "1.2.840.10008.5.1.4.1.1.77.1.6",
+            ReferencedSOPInstanceUID: target.sop,
+          },
+        ],
+      },
+    ],
+  });
+  const meta = DicomMetaDictionary.denaturalizeDataset({
+    FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
+    MediaStorageSOPClassUID: "1.2.840.10008.5.1.4.1.1.91.1",
+    MediaStorageSOPInstanceUID: sop,
+    TransferSyntaxUID: "1.2.840.10008.1.2.1",
+  });
+  const part10 = new DicomDict(meta);
+  part10.dict = dict;
+  fs.writeFileSync(file, Buffer.from(part10.write()));
+}
+
+// API: copies that an archive takes as new data, with references kept.
+test("--new-series gives new series and instance UIDs, keeps frames and references, and counts copies", async () => {
+  const source = path.join(tmpDir, "series-source");
+  const copied = await writeSyntheticWsi(dcmjs, source);
+  writeAnnotation(path.join(source, "ann.dcm"), copied.base, copied.series);
+
+  const copy1 = path.join(tmpDir, "copy-1");
+  const first1 = await transcode([source], {
+    "new-series": true,
+    directory: copy1,
+    json: true,
+    quiet: true,
+  });
+  expect(first1.code).toBe(0);
+
+  const header = async (dir, name) =>
+    (await readPart10Header({ dcmjs, inputPath: path.join(dir, name) })).dict;
+  const value = (dict, tag) => dict[tag]?.Value?.[0];
+  const base = await header(copy1, "base.dcm");
+  const half = await header(copy1, "half.dcm");
+  const ann = await header(copy1, "ann.dcm");
+
+  const newSeries = value(base, "0020000E");
+  expect(newSeries).not.toBe(copied.series.uid);
+  expect(value(half, "0020000E")).toBe(newSeries);
+  expect(value(base, "00080018")).not.toBe(copied.base.sop);
+  expect(value(base, "0020000D")).toBe(copied.series.study);
+  expect(value(base, "00200011")).toBe(1000);
+  expect(value(base, "0008103E")).toBe("(copy 1)");
+  expect(value(ann, "0008103E")).toBe("Annotations (copy 1)");
+  expect(value(ann, "00200011")).toBe(1007);
+  expect(await frameHashes(path.join(copy1, "base.dcm"))).toEqual(
+    await frameHashes(copied.base.path)
+  );
+  // The annotation now points at the copied series and instance.
+  const ref = ann["00081115"].Value[0];
+  expect(ref["0020000E"].Value[0]).toBe(newSeries);
+  expect(ref["0008114A"].Value[0]["00081155"].Value[0]).toBe(
+    value(base, "00080018")
+  );
+
+  // A copy of the copy is told apart.
+  const copy2 = path.join(tmpDir, "copy-2");
+  expect(
+    (
+      await transcode([copy1], {
+        "new-series": true,
+        directory: copy2,
+        quiet: true,
+      })
+    ).code
+  ).toBe(0);
+  const ann2 = await header(copy2, "ann.dcm");
+  expect(value(ann2, "0008103E")).toBe("Annotations (copy 2)");
+  expect(value(ann2, "00200011")).toBe(2007);
+});
+
+// User experience: the originals are never replaced by copies.
+test("--new-series needs -d", async () => {
+  const { code, err } = await transcode([wsi.base.path], {
+    "new-series": true,
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/--new-series needs -d <dir>/);
+});
+
 // User experience: loss is never silent.
 test("a lossy target needs --lossy, and the lossy file gets a new SOPInstanceUID", async () => {
   const refused = await transcode([wsi.base.path], {

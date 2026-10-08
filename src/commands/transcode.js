@@ -22,10 +22,13 @@ import {
   updatePixelHeader,
 } from "../pixel/pixelHeader.js";
 import {
+  EXPLICIT_LITTLE_ENDIAN,
   OUTPUT_ALIASES,
   distanceFromQuality,
+  isNativeSyntax,
   resolveOutputSyntax,
 } from "../pixel/transferSyntaxes.js";
+import { planNewSeries } from "../pixel/newSeries.js";
 import {
   addTotals,
   emptyTotals,
@@ -55,6 +58,13 @@ Options:
   --distance <d>          jxl: Butteraugli distance 0..25 (default 1.0)
   --effort <e>            JPEG XL effort 1..9 (default 7)
   --progressive           write progressive JPEG XL
+  --new-series            write copies that an archive accepts as new data,
+                          to test re-uploads (needs -d; --to is then
+                          optional). Each series and instance gets a new
+                          UID, and references between the copies follow;
+                          SeriesNumber goes up by 1000, SeriesDescription
+                          gets "(copy N)", and the instance creation, series
+                          and content date/time become the time of the run.
   --dry-run               list the files that would change; write nothing
   -q, --quiet             print no progress (the report is still printed)
   --json                  print the report as JSON
@@ -63,6 +73,8 @@ Options:
 Examples:
   dcmjs transcode ./slides --to jxl-jpeg            # JPEG WSI → JPEG XL, in place
   dcmjs transcode ./slides --to jpeg -d ./restored  # and back, byte for byte
+  dcmjs transcode ./study --new-series -d ./copy-1  # re-upload test data
+  dcmjs transcode ./copy-1 --new-series -d ./copy-2 # "(copy 2)"
 `;
 
 function parseNumber(values, name, min, max) {
@@ -79,23 +91,27 @@ function parseNumber(values, name, min, max) {
 
 /** Encode options and target from the command line; throws on misuse. */
 export function parseTranscodeOptions(values) {
-  if (!values.to) {
-    throw new Error("--to <syntax> is required");
+  const newSeries = Boolean(values["new-series"]);
+  if (!values.to && !newSeries) {
+    throw new Error("--to <syntax> is required (or --new-series)");
   }
-  const target = resolveOutputSyntax(values.to);
+  if (newSeries && !values.directory) {
+    throw new Error(
+      "--new-series needs -d <dir>: the copies must not replace the originals"
+    );
+  }
+  const target = values.to ? resolveOutputSyntax(values.to) : undefined;
+  const isJxl = target?.uid.endsWith(".112");
   const quality = parseNumber(values, "quality", 0, 100);
   let distance = parseNumber(values, "distance", 0, 25);
-  if (
-    distance === undefined &&
-    quality !== undefined &&
-    target.uid.endsWith(".112")
-  ) {
+  if (distance === undefined && quality !== undefined && isJxl) {
     distance = distanceFromQuality(quality);
   }
-  const lossless = Boolean(values.lossless) && target.uid.endsWith(".112");
+  const lossless = Boolean(values.lossless) && isJxl;
   return {
     target,
-    lossy: target.lossy && !lossless,
+    newSeries,
+    lossy: Boolean(target?.lossy) && !lossless,
     allowLossy: Boolean(values.lossy),
     options: {
       quality,
@@ -125,23 +141,50 @@ const tempPathFor = (target) =>
     `.${path.basename(target)}.${crypto.randomBytes(4).toString("hex")}.tmp`
   );
 
+/** The output syntax that keeps a file's pixel data as it is. */
+function keepSyntax(sourceUid) {
+  if (isNativeSyntax(sourceUid)) {
+    return resolveOutputSyntax("explicit-le");
+  }
+  return {
+    uid: sourceUid,
+    name: `transfer syntax ${sourceUid}`,
+    encapsulated: true,
+    lossy: false,
+  };
+}
+
+/** Little endian native frames are the same bytes in Explicit VR LE. */
+const LITTLE_ENDIAN_NATIVE = new Set([
+  "1.2.840.10008.1.2",
+  EXPLICIT_LITTLE_ENDIAN,
+]);
+
 /**
  * Transcodes one file to `outputPath` (which may be the input). Returns the
  * before/after sizes, or `{ skipped: reason }`.
+ *
+ * With `rewrite` (from --new-series) no file is skipped: it is called on
+ * each header, frames that need no conversion are copied as they are, and
+ * a file without pixel data is written with its new header only. `target`
+ * may then be undefined, which keeps each file's pixel data.
  */
 export async function transcodeFile({
   dcmjs,
   inputPath,
   outputPath,
-  target,
+  target: requested,
   lossy: lossyTarget,
   allowLossy,
   options,
   dryRun,
   progress,
+  rewrite,
 }) {
   let sourceUid;
   let imageInfo;
+  let target = requested;
+  let copyFrames = false;
   let skip;
   let lossy = false;
   let frameBytes = 0;
@@ -154,18 +197,29 @@ export async function transcodeFile({
       onHeader: ({ meta, dict }) => {
         sourceUid = meta["00020010"]?.Value?.[0];
         imageInfo = imageInfoFromDict(dict);
-        if (sourceUid === target.uid) {
-          skip = `already ${target.name}`;
+        if (!requested || requested.uid === sourceUid) {
+          skip = requested && `already ${requested.name}`;
         } else if (!hasDecoder(sourceUid)) {
           skip = `no decoder for transfer syntax ${sourceUid}`;
         } else if (
-          target.uid === "1.2.840.10008.1.2.4.111" &&
+          requested.uid === "1.2.840.10008.1.2.4.111" &&
           sourceUid !== "1.2.840.10008.1.2.4.50"
         ) {
           skip = "jxl-jpeg needs JPEG Baseline (1.2.840.10008.1.2.4.50) input";
         }
+        if (rewrite && (skip || !requested)) {
+          skip = undefined;
+          target = keepSyntax(sourceUid);
+        }
+        copyFrames =
+          target.uid === sourceUid ||
+          (target.uid === EXPLICIT_LITTLE_ENDIAN &&
+            LITTLE_ENDIAN_NATIVE.has(sourceUid));
         // .111 → .50 rebuilds the original JPEG, so it is not lossy.
-        lossy = lossyTarget && !isBitstreamTranscode(sourceUid, target.uid);
+        lossy =
+          !copyFrames &&
+          lossyTarget &&
+          !isBitstreamTranscode(sourceUid, target.uid);
         if (!skip && lossy && !allowLossy) {
           throw new Error(
             `${target.name} is lossy — pass --lossy to accept the loss, or ` +
@@ -186,13 +240,22 @@ export async function transcodeFile({
           frameBytes += nativeFrameBytes(imageInfo);
         }
         await spool.append(
-          await transcodeFrame(frame, imageInfo, sourceUid, target.uid, options)
+          copyFrames
+            ? frame
+            : await transcodeFrame(
+                frame,
+                imageInfo,
+                sourceUid,
+                target.uid,
+                options
+              )
         );
         progress?.frame();
       },
     });
 
-    if (!read.hasPixelData) {
+    sourceUid ??= read.transferSyntaxUID;
+    if (!read.hasPixelData && !rewrite) {
       skip = "no pixel data";
     }
     const before = {
@@ -206,19 +269,28 @@ export async function transcodeFile({
     }
 
     const { meta, dict } = read;
-    updatePixelHeader({
-      meta,
-      dict,
-      sourceUid,
-      target,
-      photometric: photometricAfter({
-        photometric: dict["00280004"]?.Value?.[0],
+    rewrite?.(meta, dict);
+    if (!read.hasPixelData) {
+      // Header only: the body keeps its transfer syntax.
+      target = { encapsulated: false };
+    } else if (copyFrames) {
+      meta["00020010"] = { vr: "UI", Value: [target.uid] };
+    } else {
+      updatePixelHeader({
+        meta,
+        dict,
         sourceUid,
         target,
-      }),
-      lossyRatio: lossy ? frameBytes / Math.max(1, spool.bytes) : undefined,
-    });
-    if (lossy) {
+        photometric: photometricAfter({
+          photometric: dict["00280004"]?.Value?.[0],
+          sourceUid,
+          target,
+        }),
+        lossyRatio: lossy ? frameBytes / Math.max(1, spool.bytes) : undefined,
+      });
+    }
+    // --new-series has already given every instance a new UID.
+    if (lossy && !rewrite) {
       renewSopInstanceUid({ dcmjs, meta, dict });
     }
 
@@ -231,6 +303,7 @@ export async function transcodeFile({
         dict,
         spool,
         encapsulated: target.encapsulated,
+        pixelData: read.hasPixelData,
       });
       fs.renameSync(tempPath, outputPath);
       return {
@@ -265,7 +338,7 @@ export async function runTranscode({
     stderr(transcodeUsage);
     return 1;
   }
-  const { target, lossy, allowLossy, options } = parsed;
+  const { target, newSeries, lossy, allowLossy, options } = parsed;
   const outDir = values.directory;
   const dryRun = Boolean(values["dry-run"]);
 
@@ -275,6 +348,19 @@ export async function runTranscode({
   } catch (err) {
     stderr(`dcmjs transcode: ${err.message}`);
     return 1;
+  }
+
+  let plan;
+  if (newSeries) {
+    try {
+      plan = await planNewSeries({
+        dcmjs,
+        files: inputs.map(([file]) => file),
+      });
+    } catch (err) {
+      stderr(`dcmjs transcode: ${err.message}`);
+      return 1;
+    }
   }
 
   const before = emptyTotals();
@@ -306,6 +392,7 @@ export async function runTranscode({
         options,
         dryRun,
         progress,
+        rewrite: plan?.rewrite,
       });
       if (result.skipped) {
         if (outDir && !dryRun) {
@@ -341,7 +428,8 @@ export async function runTranscode({
   progress.flushBatch();
 
   const report = {
-    target: target.uid,
+    target: target?.uid,
+    newSeries: plan ? Object.fromEntries(plan.series) : undefined,
     inPlace: !outDir,
     dryRun,
     before,
@@ -355,11 +443,16 @@ export async function runTranscode({
     const skipped = files.filter((f) => f.skipped);
     stdout(
       `transcode: ${changed} file${changed === 1 ? "" : "s"} → ` +
-        `${target.name} (${target.uid}), ` +
+        (target
+          ? `${target.name} (${target.uid}), `
+          : "same transfer syntax, ") +
         (dryRun ? "dry run" : outDir ? `into ${outDir}` : "in place")
     );
     if (!dryRun && changed) {
       stdout(formatSizeReport(before, after));
+    }
+    for (const [from, to] of plan?.series ?? []) {
+      stdout(`  new series ${to} (was ${from})`);
     }
     for (const s of skipped) {
       stdout(`  skipped ${s.file}: ${s.skipped}`);

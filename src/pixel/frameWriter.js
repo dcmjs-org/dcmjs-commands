@@ -154,7 +154,8 @@ async function* nativeBody(spool) {
 }
 
 /**
- * Writes `{ meta, dict }` plus the spooled frames to `outputPath`. Elements
+ * Writes `{ meta, dict }` plus the spooled frames (none when `pixelData` is
+ * false) to `outputPath`. Elements
  * after PixelData (trailing padding, signatures) cannot follow rewritten
  * pixels, so they are dropped and their tags returned.
  *
@@ -167,6 +168,7 @@ export async function writePart10WithFrames({
   dict,
   spool,
   encapsulated,
+  pixelData = true,
 }) {
   await spool.close();
   const dropped = [];
@@ -193,8 +195,10 @@ export async function writePart10WithFrames({
 
   async function* file() {
     yield headerBytes;
-    yield pixelElementHeader;
-    yield* body;
+    if (pixelData) {
+      yield pixelElementHeader;
+      yield* body;
+    }
   }
   await pipeline(file, fs.createWriteStream(outputPath));
 

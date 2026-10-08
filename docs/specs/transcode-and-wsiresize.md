@@ -47,6 +47,17 @@ rules:
   when it starts and lines that show how many of its frames are done. Small files are
   reported in batches. With `-q` or `--quiet`, the command shows no progress. The progress
   never goes to stdout, so `--json` output stays valid.
+- **TC-U10.** With `--new-series`, the user can make copies of existing DICOM files that an
+  archive accepts as new data, to test a re-upload. The command needs `-d <dir>`, so the
+  originals never change, and `--to` is optional.
+  - Each series, instance, pyramid and concatenation gets a new UID. The StudyInstanceUID
+    and the FrameOfReferenceUID do not change.
+  - References between the copies stay valid. For example, a copied bulk annotation
+    refers to the copied image.
+  - SeriesNumber increases by 1000. SeriesDescription gets ` (copy N)`, and N increases by
+    one for each copy of a copy, so the user can see which iteration an upload came from.
+  - The instance creation, series and content date and time get the time of the run.
+  - The pixel data does not change, unless `--to` asks for a different transfer syntax.
 
 ### `dcmjs wsiresize`
 
@@ -103,6 +114,12 @@ rules:
 - **TC-I1.** The command skips a file that has no pixel data, a file that already has the
   target syntax, and a file that has no decoder. With `-d`, the command copies such DICOM
   files unchanged.
+- **TC-I3.** `--new-series` reads the header of each input first and maps each identifying
+  UID (0020,000E), (0008,0018), (0008,0019) and (0020,9161) to a new UID. A rewrite then
+  sends every UI value of each file, in all sequences and in the file meta, through the
+  same map. With `--new-series`, files that `transcode` would skip are written too: their
+  frames are copied without a codec, and a file without pixel data gets only the new
+  header.
 - **TC-I2.** Native input frames come from one PixelData buffer, because the stream reader
   gives a native value as one buffer. Thus a native input must be smaller than 2 GiB.
 

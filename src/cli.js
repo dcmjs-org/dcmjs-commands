@@ -154,6 +154,7 @@ const COMMANDS = {
       distance: { type: "string" },
       effort: { type: "string" },
       progressive: { type: "boolean", default: false },
+      "new-series": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       quiet: { type: "boolean", short: "q", default: false },

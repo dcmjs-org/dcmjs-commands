@@ -244,6 +244,17 @@ dcmjs transcode ./slides --to jpeg -d ./restored    # back to the JPEG frames
 dcmjs transcode ./ct --to jxl-lossless -d ./ct-jxl
 ```
 
+`--new-series` writes copies that an archive takes as new data, to test
+re-uploads: new series and instance UIDs (references between the copies
+follow), SeriesNumber + 1000, SeriesDescription "… (copy N)" counting up
+for each copy of a copy, and the instance date/time of the run. It needs
+`-d`; `--to` is optional.
+
+```bash
+dcmjs transcode ./study --new-series -d ./copy-1
+dcmjs transcode ./copy-1 --new-series -d ./copy-2   # "(copy 2)"
+```
+
 ### wsiresize
 
 Rebuild a whole-slide pyramid from its base level with a new tile size,
