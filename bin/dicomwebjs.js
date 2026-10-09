@@ -1,28 +1,34 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
+// bin/dicomwebjs.js
+//
+// DICOMweb tools: dump/instance against http or Static DICOMweb file
+// sources, plus download/part10 study transfers (src/commands/webTransfer).
+
 import { Command } from "commander";
 import { dicomweb, instanceDicom, dumpDicom } from "../src/index.js";
-import cliDownload from "./cliDownload.js";
-import cliPart10 from "./cliPart10.js";
+import { registerTransferCommands } from "../src/commands/webTransfer.js";
+import { setOptions } from "../src/utils/logger.js";
+import { exitOnEpipe } from "../src/utils/exitOnEpipe.js";
+
+// `dicomwebjs dump url | head` must end quietly when head closes the pipe
+exitOnEpipe();
 
 const program = new Command();
-
-program.option(
-  "-s, --study <studyInstanceUID>",
-  "Download a specific study instance UID"
-);
 
 program
   .name("dicomwebjs")
   .description("dicomwebjs based tools for manipulation of DICOMweb")
-  .version("0.0.1")
-  .option("--seriesUID <seriesUID>", "For a specific seriesUID");
+  .version("0.1.0");
 
 program
   .command("dump")
-  .description("Dump a dicomweb file")
+  .description("Dump a dicomweb query/metadata response")
   .argument("<dicomwebUrl>", "dicomweb URL or file location")
-  .option("--debug", "Set debug level logging")
+  .option("--debug", "debug logging")
+  .option("--verbose", "info-level logging")
+  .option("--quiet", "errors only")
   .action(async (fileName, options) => {
+    setOptions(options);
     const qido = await dicomweb.readDicomWeb(fileName, options);
     for (const dict of qido) {
       dumpDicom({ dict });
@@ -31,18 +37,23 @@ program
 
 program
   .command("instance")
-  .description("Write the instance data")
-  .argument("<part10>", "part 10 file")
-  .option("-p, --pretty", "Pretty print")
-  .option("--debug", "Set debug level logging")
+  .description("Write the instance data as DICOM JSON")
+  .argument("<dicomwebUrl>", "dicomweb URL or file location")
+  .option("-p, --pretty", "pretty print")
+  .option("--debug", "debug logging")
+  .option("--verbose", "info-level logging")
+  .option("--quiet", "errors only")
   .action(async (fileName, options) => {
+    setOptions(options);
     const qido = await dicomweb.readDicomWeb(fileName, options);
     for (const dict of qido) {
       instanceDicom({ dict }, options);
     }
   });
 
-cliDownload(program);
-cliPart10(program);
+registerTransferCommands(program);
 
-program.parse();
+program.parseAsync().catch((err) => {
+  console.error(`dicomwebjs: ${err.message}`);
+  process.exitCode = 1;
+});

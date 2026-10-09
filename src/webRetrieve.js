@@ -1,17 +1,21 @@
 import https from "https";
 import http from "http";
-import URL from "url";
 import zlib from "zlib";
 
-export function httprequest(url, _options) {
+const DEFAULT_TIMEOUT_MS = 30000;
+
+export function httprequest(url, options = {}) {
   return new Promise((resolve, reject) => {
-    const urlObj = URL.parse(url, true);
+    const urlObj = new URL(url);
     const isHttps = urlObj.protocol === "https:";
     const httpType = isHttps ? https : http;
 
     const req = httpType.request(urlObj, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
-        return reject(new Error("statusCode=" + res.statusCode));
+        res.resume();
+        return reject(
+          new Error(`Request to ${url} failed: statusCode=${res.statusCode}`)
+        );
       }
       const body = [];
       res.on("data", function (chunk) {
@@ -42,8 +46,11 @@ export function httprequest(url, _options) {
         }
       });
     });
+    req.setTimeout(options.timeout ?? DEFAULT_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Request to ${url} timed out`));
+    });
     req.on("error", (e) => {
-      reject(e.message);
+      reject(e instanceof Error ? e : new Error(String(e)));
     });
     // send the request
     req.end();

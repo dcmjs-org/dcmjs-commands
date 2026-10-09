@@ -2,12 +2,10 @@ import zlib from "zlib";
 import fs from "fs";
 
 import { httprequest } from "./webRetrieve.js";
-import { logger } from "./utils/index.js";
-
-const log = logger.commandsLog;
 
 /**
- * The dicomweb support classes for querying and reading various DICOMweb data sources
+ * The dicomweb support functions for reading DICOMweb data from http
+ * URLs or Static DICOMweb files.
  */
 
 export function readDicomWeb(url, options = {}) {
@@ -23,45 +21,10 @@ export function readDicomWebHttp(url, options) {
 
 export function readDicomWebFile(fileName, _options) {
   const isGzip = fileName.endsWith(".gz");
-  const arrayBuffer = fs.readFileSync(fileName).buffer;
-  const uncompressed = isGzip ? zlib.gunzipSync(arrayBuffer) : arrayBuffer;
-  const str = uncompressed.toString();
-  return JSON.parse(str);
-}
-
-export function getStudyQuery(wadoUrl, _options, forStudy) {
-  const { StudyInstanceUID } = forStudy;
-  console.log("Querying for study", StudyInstanceUID);
-  return `${wadoUrl}?StudyInstanceUID=${StudyInstanceUID}`;
-}
-
-export function getSeriesQuery(wadoUrl, options, forStudy) {
-  const { StudyInstanceUID } = forStudy;
-  return `${wadoUrl}/studies/${StudyInstanceUID}/series`;
-}
-
-export async function queryDownloads(wadoUrl, options) {
-  const StudyInstanceUID = options.study;
-  const SeriesInstanceUID = options.series || [];
-  const query = { StudyInstanceUID, SeriesInstanceUID };
-  const studyQuery = getStudyQuery(wadoUrl, options);
-  const study = await readDicomWeb(studyQuery)?.[0];
-  const downloaded = [];
-  if (!study) {
-    log.warn("No study found for", options.study);
-    return downloaded;
-  }
-  downloaded.push({
-    relativePath: `studies/${StudyInstanceUID}`,
-    data: [study],
-  });
-
-  const series = await readDicomWeb(getSeriesQuery(wadoUrl, options, query));
-  log.debug("Found series", series);
-  return [];
-}
-
-export function store(path, data, options) {
-  log.info("Storing data", path);
-  log.debug(JSON.stringify(data, null, 2));
+  // Work on the Buffer directly — a bare `.buffer` is the shared read pool
+  // for small files, and stringifying an ArrayBuffer yields
+  // "[object ArrayBuffer]" rather than the content.
+  const buf = fs.readFileSync(fileName);
+  const uncompressed = isGzip ? zlib.gunzipSync(buf) : buf;
+  return JSON.parse(uncompressed.toString("utf-8"));
 }
