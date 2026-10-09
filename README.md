@@ -271,7 +271,10 @@ dcmjs wsiresize ./slide -d ./resized --preset jxl-medium
 dcmjs wsiresize ./slide --in-place --preset jxl-high --tile 512
 ```
 
-See [docs/specs/transcode-and-wsiresize.md](docs/specs/transcode-and-wsiresize.md).
+Expect long runs on large slides: a 229079 x 98511 JPEG slide (5 levels,
+9.1 GB) took 15 h 10 min with `jxl-high` on one thread, and came out at
+4.3 GB (-52.5% image bytes). Sample times and sizes are in the
+[specification](docs/specs/transcode-and-wsiresize.md#measured-results).
 
 ### patient-access
 

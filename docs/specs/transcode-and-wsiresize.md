@@ -139,9 +139,63 @@ rules:
 - **WR-I5.** Partial edge tiles are filled with white (255), or with black (0) for
   MONOCHROME2.
 
+## Measured results
+
+Each result is one run with Node 24 on one thread, with JPEG XL effort 7. The times
+depend on the machine. Use them as a scale, not as a guarantee.
+
+### Large slide: `wsiresize -p jxl-high`
+
+The source is the full-resolution level of a slide from the NCI Imaging Data Commons
+CMB-MML collection (see [EXAMPLES.md](../../EXAMPLES.md), the whole-slide section):
+
+- JPEG Baseline, TILED_FULL, 240 x 240 tiles;
+- total pixel matrix 229079 x 98511 (22.6 gigapixels), 3 samples per pixel;
+- a pyramid of 5 levels.
+
+The run took 15 h 10 min. That is about 2.35 s for each output tile, from the source
+decode to the JPEG XL encode, or about 410,000 source pixels each second.
+
+```
+  jxl-high: JPEG XL distance 1, 1024px tiles, factor 4, progressive
+  total pixel matrix 229079 x 98511, 3 samples per pixel
+  before: 5 levels, 240px tiles: 229079x98511, 57269x24627, 14317x6156, 3579x1539, 1024x440
+  after:  5 levels, 1024px tiles: 229079x98511, 57270x24628, 14318x6157, 3580x1540, 895x385
+           instances    frames   header bytes     image bytes      file bytes
+  before           5   418,788     33,661,306   9,065,950,964   9,099,612,270
+  after            5    23,235     40,161,586   4,307,038,918   4,347,200,504
+  change       +0.0%    -94.5%         +19.3%          -52.5%          -52.2%
+```
+
+The frames per level after the run are 21,728, 1,400, 98, 8 and 1. The image bytes
+decrease by 52.5%. The number of frames decreases by 94.5%, because the 1024 x 1024
+tiles hold 18 times the area of the 240 x 240 tiles.
+
+### Small pyramid: `transcode` and `wsiresize`
+
+The source is a JPEG Baseline pyramid of 7 levels:
+
+- a base level of 24000 x 16896 with 512 x 512 tiles;
+- 2,111 frames in total;
+- 29.4 MB.
+
+| Command | Time | Image bytes | Change |
+| --- | --- | --- | --- |
+| `transcode --to jxl-jpeg` (in place, lossless) | 6.6 s | 28,981,978 → 21,401,476 | -26.2% |
+| `transcode --to jpeg` from the `.111` copy | — | 21,402,552 → 28,981,978 | the same JPEG bytes |
+| `wsiresize -p jxl-high` (7 → 4 levels) | 275 s | 28,981,978 → 26,143,543 | -9.8% |
+| `wsiresize -p jxl-medium --in-place` | 294 s | 28,981,978 → 18,326,602 | -36.8% |
+
+The peak memory of the `jxl-high` run on the small pyramid was 584 MB. The memory of
+`wsiresize` increases with the width of the slide. The command keeps one band of 1024
+rows for each level, so the large slide above needs about 1.1 GB for the bands.
+
 ## Known limits
 
 - The writer from dcmjs writes sequences with undefined length. Thus the header can be
   larger than the header of the source, with the same content.
-- `wsiresize` encodes one tile at a time on one thread. A JPEG XL tile of 1024 x 1024 at
-  effort 7 takes about 0.4 s.
+- `wsiresize` encodes one tile at a time on one thread. The encode of one 1024 x 1024
+  JPEG XL tile at effort 7 takes about 0.4 s. With the source decode and the resample,
+  the large slide above took about 2.35 s for each output tile. Effort 4 is about 10
+  times faster for the encode, with a lower quality (41.8 dB against 49.5 dB PSNR on a
+  dense tile).
