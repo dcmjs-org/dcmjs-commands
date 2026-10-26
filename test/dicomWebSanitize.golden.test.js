@@ -12,11 +12,9 @@ import fs from "fs";
 import path from "path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import { part10ToEntry } from "../src/part10/part10ToDicomWebJson.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 
 const { DicomMessage } = dcmjs.data;

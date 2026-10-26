@@ -19,7 +19,7 @@ import {
 import { runDicomweb } from "../src/commands/dicomweb.js";
 
 const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 
 const { DicomMessage } = dcmjs.data;

@@ -9,11 +9,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import { TOOLS } from "../../src/mcp/registry.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

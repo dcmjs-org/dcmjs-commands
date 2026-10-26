@@ -78,7 +78,7 @@ export async function convertMp4ToDicom({
 
   try {
     const events = DicomEventStream.fromVideoStream(reader, {
-      ...options,
+      overrides: options,
       fragmentBytes,
     });
     await events.process(writer);

@@ -11,7 +11,6 @@ import os from "os";
 import path from "path";
 import zlib from "zlib";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import { DicomAccess } from "../src/access/DicomAccess.js";
 import { runTransfer } from "../src/commands/webTransfer.js";
 import { runDicomweb } from "../src/commands/dicomweb.js";
@@ -21,8 +20,7 @@ import {
   looksLikePart10Directory,
 } from "../src/io.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 
 const { DicomMessage } = dcmjs.data;
