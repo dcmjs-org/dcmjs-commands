@@ -86,7 +86,9 @@ describe("StaticDicomWebStudy tree navigation", () => {
 
     const access = await DicomAccess.createInstance(root, {});
     const study = await access.queryStudy(studyUID);
-    expect(study.natural[0].PatientName[0].Alphabetic).toBe("Doe^Jane");
+    expect([].concat(study.natural[0].PatientName)[0].Alphabetic).toBe(
+      "Doe^Jane"
+    );
 
     const children = await study.queryChildren();
     expect(children).toHaveLength(1);

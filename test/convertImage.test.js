@@ -9,12 +9,10 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { PNG } from "pngjs";
-import { createRequire } from "node:module";
 import { runConvert } from "../src/commands/convert.js";
 import { sniffKind } from "../src/io.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 
 const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
