@@ -236,8 +236,17 @@ export class StaticDicomWebInstance extends InstanceAccess {
       throw new Error(`bulkdata file not found for tag ${key}: ${filePath}`);
     }
     const raw = fsBase.readFileSync(filePath);
-    const headerEnd = raw.indexOf("\r\n\r\n");
-    const trailer = raw.lastIndexOf("\r\n--");
+    // Multipart only when the file opens with a boundary line and closes
+    // with that same boundary; payload bytes alone never decide it.
+    const lead = raw.subarray(0, 2).toString("latin1") === "\r\n" ? 2 : 0;
+    const boundaryEnd = raw.indexOf("\r\n", lead);
+    const boundary =
+      raw.subarray(lead, lead + 2).toString("latin1") === "--" &&
+      boundaryEnd > lead + 2
+        ? raw.toString("latin1", lead + 2, boundaryEnd)
+        : null;
+    const headerEnd = boundary ? raw.indexOf("\r\n\r\n", lead) : -1;
+    const trailer = boundary ? raw.lastIndexOf(`\r\n--${boundary}`) : -1;
     if (headerEnd < 0 || trailer <= headerEnd) {
       // not multipart-wrapped (encapsulated write): return as-is
       return {
