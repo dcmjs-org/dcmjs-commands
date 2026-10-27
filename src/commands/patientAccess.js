@@ -218,6 +218,9 @@ async function authorize({
         `authorization with --token <bearer>`
     );
   }
+  // The code, the PKCE verifier, and the token travel to these addresses.
+  assertSecureAddress(authorization_endpoint, "authorization_endpoint");
+  assertSecureAddress(token_endpoint, "token_endpoint");
   const { codeVerifier, codeChallenge } = generatePkce();
   const state = generateState();
   const redirectUri = `http://127.0.0.1:${port}${REDIRECT_PATH}`;

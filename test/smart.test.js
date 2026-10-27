@@ -534,10 +534,29 @@ describe("searchImagingStudies paging", () => {
   }
 
   test("follows next links and returns the studies of every page", async () => {
+    // page 1 includes the shared Endpoint once; page 2 references it;
+    // page 3 repeats study 1.1 (offset paging over a changing result set)
+    const first = page("1.1", "/fhir?page=2");
+    first.entry.push({
+      fullUrl: "https://img.example/fhir/Endpoint/shared",
+      resource: {
+        resourceType: "Endpoint",
+        id: "shared",
+        connectionType: { code: "dicom-wado-rs" },
+        address: "https://img.example/wado-shared",
+      },
+    });
+    const second = page("1.2", "https://img.example/fhir?page=3");
+    const study2 = second.entry[0].resource;
+    delete study2.contained;
+    study2.endpoint = [{ reference: "Endpoint/shared" }];
+    const third = page("1.3");
+    third.entry.push(page("1.1").entry[0]);
+
     const { fetchFn, calls } = fakeFetch([
-      ["page=3", jsonResponse(page("1.3"))],
-      ["page=2", jsonResponse(page("1.2", "https://img.example/fhir?page=3"))],
-      ["/ImagingStudy?", jsonResponse(page("1.1", "/fhir?page=2"))],
+      ["page=3", jsonResponse(third)],
+      ["page=2", jsonResponse(second)],
+      ["/ImagingStudy?", jsonResponse(first)],
     ]);
     const result = await searchImagingStudies({
       imagingBase: "https://img.example/fhir",
@@ -550,6 +569,7 @@ describe("searchImagingStudies paging", () => {
       "1.2",
       "1.3",
     ]);
+    expect(result.studies[1].wadoBase).toBe("https://img.example/wado-shared");
     expect(calls).toHaveLength(3);
     expect(calls[2].options.headers.Authorization).toBe("Bearer tok1");
   });

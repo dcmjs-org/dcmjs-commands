@@ -447,6 +447,30 @@ describe("endpoint policy (the token only goes where it belongs)", () => {
     expect(calls.some((c) => c.url.includes("/ImagingStudy"))).toBe(false);
   });
 
+  test("an http token_endpoint is refused before authorization starts", async () => {
+    mockGlobalFetch([
+      [
+        "/.well-known/smart-configuration",
+        jsonResponse({
+          ...SMART_CONFIG,
+          token_endpoint: "http://ehr.example/token",
+        }),
+      ],
+    ]);
+    let opened = false;
+    const { code, err } = await run(
+      {
+        "fhir-url": "https://ehr.example/fhir",
+        "client-id": "app",
+        "dry-run": true,
+      },
+      { openBrowser: () => (opened = true) }
+    );
+    expect(code).toBe(1);
+    expect(err).toMatch(/token_endpoint .* not https/);
+    expect(opened).toBe(false);
+  });
+
   test("an http endpoint is refused before any retrieval", async () => {
     mockGlobalFetch([
       [

@@ -140,9 +140,12 @@ const MAX_SEARCH_PAGES = 100;
  * Search the imaging endpoint for the patient's studies and resolve each
  * one's WADO-RS base. Follows the Bundle `next` links, so a paged result
  * returns every study. A `next` link to a different origin is refused,
- * because each page request carries the access token.
+ * because each page request carries the access token. Endpoints resolve
+ * against the entries of all pages (a server may include a shared
+ * Endpoint only once), and a study repeated across pages is kept once.
  * @returns {Promise<{url, bundle, studies: Array<{study, wadoBase,
- *   studyInstanceUID}>}>} `url` and `bundle` are the first page
+ *   studyInstanceUID}>}>} `url` is the first page; `bundle` holds the
+ *   entries of every page
  */
 export async function searchImagingStudies({
   imagingBase,
@@ -163,7 +166,7 @@ export async function searchImagingStudies({
   const origin = new URL(url).origin;
 
   let firstBundle;
-  const studies = [];
+  const entries = [];
   let pageUrl = url;
   for (let page = 1; pageUrl; page++) {
     if (page > MAX_SEARCH_PAGES) {
@@ -180,10 +183,19 @@ export async function searchImagingStudies({
       imagingBase
     );
     firstBundle ??= bundle;
-    studies.push(...studiesFromBundle(bundle));
+    entries.push(...(bundle.entry ?? []));
     pageUrl = nextPageUrl(bundle, pageUrl, origin);
   }
-  return { url, bundle: firstBundle, studies };
+  const bundle = { ...firstBundle, entry: entries };
+  const seen = new Set();
+  const studies = studiesFromBundle(bundle).filter(({ studyInstanceUID }) => {
+    if (seen.has(studyInstanceUID)) {
+      return false;
+    }
+    seen.add(studyInstanceUID);
+    return true;
+  });
+  return { url, bundle, studies };
 }
 
 /** The absolute `next` link of a search Bundle, or null on the last page. */
