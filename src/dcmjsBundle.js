@@ -1,22 +1,13 @@
 // src/dcmjsBundle.js
 //
-// Single import point for the dcmjs library. The published 1.0 beta keeps
-// the classic 0.52 surface on the package's default entry and splits the
-// new engines out (dcmjs-org/dcmjs#595): eventStream is an ESM-only
-// subpath export, media/encapsulated/image live in @dcmjs-org/media, and
-// the FHIR mappers live in @dcmjs-org/fhir. The commands are written
-// against the composite surface, so this module reassembles it.
-//
-// The sibling packages load via createRequire: they ship ES sources with
-// no "type": "module" marker, which native-ESM tooling (jest's loader)
-// refuses to parse, while node's require loads them everywhere.
+// Single import point for the dcmjs library; see loadEventStream and the
+// default export for how the composite surface is reassembled.
 
 import path from "node:path";
 
 // process.getBuiltinModule reaches node's real module system even under
-// jest, whose own node:module shim compiles required files as CJS and so
-// cannot load the ESM sources the @dcmjs-org packages ship. Node's require
-// detects ESM syntax and loads them fine (require(esm), node >= 22.12).
+// jest, whose node:module shim cannot load the ESM sources the
+// @dcmjs-org packages ship (node >= 22.12 require(esm) can).
 const { createRequire } = process.getBuiltinModule("node:module");
 const require = createRequire(import.meta.url);
 
@@ -34,19 +25,42 @@ try {
 const { media, encapsulated, image } = require("@dcmjs-org/media");
 const fhirSink = require("@dcmjs-org/fhir");
 
-// dcmjs/eventStream is an import-only subpath (no require condition), and
-// jest's CJS pipeline can't parse the built ES file either — so resolve it
-// next to the base bundle and require the file directly.
-const eventStream = require(
-  path.join(path.dirname(require.resolve("dcmjs")), "eventStream.es.js")
-);
+/**
+ * Load the `dcmjs/eventStream` subpath export.
+ *
+ * The subpath has only an `import` condition. Node loads it through the
+ * public export. Jest's ESM loader treats the built `.es.js` file as CJS
+ * and cannot parse it, so only then fall back to requiring the built file
+ * next to the base bundle. Remove the fallback once dcmjs adds a
+ * `require` condition for `./eventStream`.
+ */
+async function loadEventStream() {
+  try {
+    return await import("dcmjs/eventStream");
+  } catch (importError) {
+    try {
+      return require(
+        path.join(path.dirname(require.resolve("dcmjs")), "eventStream.es.js")
+      );
+    } catch {
+      throw importError;
+    }
+  }
+}
+
+const eventStream = await loadEventStream();
 
 const { DicomMessage, DicomMetaDictionary } = base.data;
 
-// The 1.0-beta integration wrapper shipped fhir.fromPart10 (a Part 10
-// ArrayBuffer straight to FHIR); the published @dcmjs-org/fhir has no
-// reader dependency, so compose it here from the classic reader and
-// naturalizer, same as the wrapper did.
+/**
+ * The published 1.0 beta splits the engines out of the default entry
+ * (dcmjs-org/dcmjs#595): eventStream is a subpath export,
+ * media/encapsulated/image live in @dcmjs-org/media, and the FHIR mappers
+ * live in @dcmjs-org/fhir. The commands use the composite surface of the
+ * earlier integration preview, so this object reassembles it, including
+ * `fhir.fromPart10` (Part 10 ArrayBuffer → FHIR), which @dcmjs-org/fhir
+ * does not ship because it has no reader dependency.
+ */
 const fhir = {
   ...fhirSink,
   fromPart10(arrayBuffer, options = {}) {
