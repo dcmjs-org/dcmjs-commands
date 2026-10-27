@@ -268,7 +268,10 @@ test("--in-place keeps focal planes apart, and places levels that have no plane 
     prefix: "b-",
   });
   const sourceA = await decodeLevel(a.base.path);
-  expect((await wsiresize([planes], opts)).code).toBe(0);
+  const run = await wsiresize([planes], opts);
+  expect(run.code).toBe(0);
+  // The halves have no plane position: they are named, not left silently.
+  expect(run.err).toMatch(/warning: .*a-half\.dcm: the focal plane/);
   // The sparse base is placed by its new plane positions, pixel for pixel.
   const rebuiltA = await decodeLevel(a.base.path);
   expect(Buffer.from(rebuiltA.data).equals(Buffer.from(sourceA.data))).toBe(

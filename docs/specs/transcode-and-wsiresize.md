@@ -232,8 +232,13 @@ rules:
 - **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
   the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the plane position (from
   the shared groups, else from the frames when all frames share one Z offset; a focus map
-  gives no Z key). A level without a Z key joins the one focal plane of its optical path. When the optical path has several focal planes, such
-  a level cannot be placed, and the command leaves it as it is. LABEL and OVERVIEW images are
+  gives no Z key). A level without a Z key joins the one focal plane of its optical path.
+  When the optical path has several focal planes, such a level cannot be placed: the command
+  leaves it as it is and names it on stderr. A full-size level that cannot be placed is a
+  plane that is not rebuilt, so it is an error and counts as a failure; a smaller one is a
+  warning. A plane group without a VOLUME base is reported the same way, never dropped
+  silently. Every level of a pyramid, not only the base, is refused when two of its frames
+  share a tile position. LABEL and OVERVIEW images are
   not grouped. A file that two inputs hold is read once. A file whose header cannot be read
   is reported on stderr, counted as a failure, and skipped; the other series still run.
   `transcode --new-series` skips such a file in its UID plan, and the copy step reports it.

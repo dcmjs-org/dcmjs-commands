@@ -226,8 +226,10 @@ function planeKey(dict) {
  * `{ uid, key, base, levels, shared, multiPlane }`. LABEL and OVERVIEW
  * images are left out. A file is read once, also when two inputs hold it;
  * a file whose header cannot be read goes to `unreadable` and is skipped.
+ * A level that cannot be placed on one focal plane goes to `unplaced` as
+ * `{ file, fullSize }`, and is left as it is.
  */
-async function findPyramids(dcmjs, positionals, unreadable) {
+async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
   const pyramids = new Map();
   const seen = new Set();
   for (const input of positionals) {
@@ -262,27 +264,44 @@ async function findPyramids(dcmjs, positionals, unreadable) {
     }
   }
   let groups = [...pyramids.values()];
-  // TILED_FULL levels often carry no plane position: they join the one
+  const area = ({ dict }) =>
+    Number(first(dict, "00480006") ?? 0) * Number(first(dict, "00480007") ?? 0);
+  // Levels without a Z key (TILED_FULL levels, focus maps) join the one
   // focal plane of their optical path. With several planes they cannot be
-  // placed, so they are left as they are.
+  // placed: they are reported and left as they are.
+  const loosePlaced = [];
   for (const loose of groups.filter((g) => g.z === "")) {
     const planes = groups.filter(
       (g) => g.uid === loose.uid && g.paths === loose.paths && g.z !== ""
     );
     if (planes.length === 1) {
       planes[0].levels.push(...loose.levels);
+    } else if (planes.length > 1) {
+      const largest = Math.max(...planes.flatMap((g) => g.levels.map(area)), 0);
+      for (const level of loose.levels) {
+        loosePlaced.push({
+          file: level.path,
+          fullSize: area(level) >= largest,
+        });
+      }
     }
     if (planes.length) {
       loose.levels = [];
     }
   }
-  const area = ({ dict }) =>
-    Number(first(dict, "00480006") ?? 0) * Number(first(dict, "00480007") ?? 0);
+  unplaced.push(...loosePlaced);
   for (const group of groups) {
     group.levels.sort((a, b) => area(b) - area(a));
     group.base = group.levels.find(
       (l) => (l.dict["00080008"]?.Value ?? [])[2] === "VOLUME"
     );
+    // A plane whose base did not come with it (an unplaced focus-map base)
+    // is not rebuilt; its levels are reported too, never dropped silently.
+    if (!group.base) {
+      for (const level of group.levels) {
+        unplaced.push({ file: level.path, fullSize: false });
+      }
+    }
   }
   groups = groups.filter((g) => g.base);
   for (const group of groups) {
@@ -312,10 +331,35 @@ function checkPlanes({ dict, path: file }) {
   }
 }
 
+/**
+ * Refuses a sparse image with two frames at one tile position: that is a
+ * second focal plane or optical path inside the image (the counts are
+ * optional for TILED_SPARSE).
+ */
+function checkOneTilePerPosition({ dict, path: file }) {
+  const seen = new Set();
+  for (const item of dict["52009230"]?.Value ?? []) {
+    const position = item["0048021A"]?.Value?.[0];
+    if (!position) {
+      continue;
+    }
+    const key = `${first(position, "0048021E")},${first(position, "0048021F")}`;
+    if (seen.has(key)) {
+      throw new Error(
+        `${file}: two frames at tile (${key}); more than one focal plane or ` +
+          "optical path in one image is not supported"
+      );
+    }
+    seen.add(key);
+  }
+}
+
 /** Refuses a pyramid that the rebuild would not reproduce in full. */
 function checkPyramid(group) {
+  // Every level: the base is rebuilt, and the others are deleted.
   for (const level of group.levels) {
     checkPlanes(level);
+    checkOneTilePerPosition(level);
   }
   const { base } = group;
   const twin = group.levels.find(
@@ -960,8 +1004,9 @@ export async function runWsiResize({
 
   let groups;
   const unreadable = [];
+  const unplaced = [];
   try {
-    groups = await findPyramids(dcmjs, positionals, unreadable);
+    groups = await findPyramids(dcmjs, positionals, unreadable, unplaced);
   } catch (err) {
     stderr(`dcmjs wsiresize: ${err.message}`);
     return 1;
@@ -969,6 +1014,14 @@ export async function runWsiResize({
   for (const { file, error } of unreadable) {
     stderr(`dcmjs wsiresize: ${file}: skipped, ${error}`);
   }
+  // A full-size level that cannot be placed is a plane that is not rebuilt.
+  for (const { file, fullSize } of unplaced) {
+    stderr(
+      `dcmjs wsiresize: ${fullSize ? "" : "warning: "}${file}: the focal ` +
+        "plane of this level is unclear, so it is left as it is"
+    );
+  }
+  const unplacedBases = unplaced.filter((u) => u.fullSize).length;
   if (!groups.length) {
     stderr("dcmjs wsiresize: no VL Whole Slide Microscopy pyramid found");
     return 1;
@@ -998,7 +1051,7 @@ export async function runWsiResize({
   };
 
   const reports = [];
-  let failed = unreadable.length;
+  let failed = unreadable.length + unplacedBases;
   const progress = new Progress({
     command: "wsiresize",
     totalFiles: groups.length,
