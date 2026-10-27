@@ -506,3 +506,66 @@ describe("assertStateMatches", () => {
     ).toThrow(/does not match this run's/);
   });
 });
+
+describe("searchImagingStudies paging", () => {
+  function page(uid, next) {
+    return {
+      resourceType: "Bundle",
+      link: next ? [{ relation: "next", url: next }] : [],
+      entry: [
+        {
+          resource: {
+            resourceType: "ImagingStudy",
+            id: uid,
+            identifier: [{ system: "urn:dicom:uid", value: `urn:oid:${uid}` }],
+            endpoint: [{ reference: "#e" }],
+            contained: [
+              {
+                resourceType: "Endpoint",
+                id: "e",
+                connectionType: { code: "dicom-wado-rs" },
+                address: "https://img.example/wado",
+              },
+            ],
+          },
+        },
+      ],
+    };
+  }
+
+  test("follows next links and returns the studies of every page", async () => {
+    const { fetchFn, calls } = fakeFetch([
+      ["page=3", jsonResponse(page("1.3"))],
+      ["page=2", jsonResponse(page("1.2", "https://img.example/fhir?page=3"))],
+      ["/ImagingStudy?", jsonResponse(page("1.1", "/fhir?page=2"))],
+    ]);
+    const result = await searchImagingStudies({
+      imagingBase: "https://img.example/fhir",
+      token: "tok1",
+      patient: "p1",
+      fetchFn,
+    });
+    expect(result.studies.map((s) => s.studyInstanceUID)).toEqual([
+      "1.1",
+      "1.2",
+      "1.3",
+    ]);
+    expect(calls).toHaveLength(3);
+    expect(calls[2].options.headers.Authorization).toBe("Bearer tok1");
+  });
+
+  test("a next link to another origin is refused before the token goes there", async () => {
+    const { fetchFn, calls } = fakeFetch([
+      ["/ImagingStudy?", jsonResponse(page("1.1", "https://evil.example/p2"))],
+    ]);
+    await expect(
+      searchImagingStudies({
+        imagingBase: "https://img.example/fhir",
+        token: "tok1",
+        patient: "p1",
+        fetchFn,
+      })
+    ).rejects.toThrow(/different origin/);
+    expect(calls).toHaveLength(1);
+  });
+});

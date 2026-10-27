@@ -88,22 +88,7 @@ export function assertEndpointAllowed(
   wadoBase,
   { trustedOrigins, allowCrossOrigin = false, stderr }
 ) {
-  let url;
-  try {
-    url = new URL(wadoBase);
-  } catch {
-    throw new Error(
-      `study Endpoint address "${wadoBase}" is not a valid URL — ` +
-        `refusing to send the access token to it`
-    );
-  }
-  const isLoopback = LOOPBACK_HOSTNAMES.has(url.hostname);
-  if (url.protocol !== "https:" && !isLoopback) {
-    throw new Error(
-      `study Endpoint address ${wadoBase} is not https — the access ` +
-        `token would travel in clear text; refusing to retrieve from it`
-    );
-  }
+  const url = assertSecureAddress(wadoBase, "study Endpoint address");
   if (!trustedOrigins.has(url.origin)) {
     if (!allowCrossOrigin) {
       throw new Error(
@@ -119,6 +104,31 @@ export function assertEndpointAllowed(
         `cross-origin endpoint ${url.origin} (--allow-cross-origin-endpoints)`
     );
   }
+}
+
+/**
+ * Require a parseable https address (loopback hostnames exempt) before the
+ * access token is sent to it.
+ * @returns {URL}
+ * @throws {Error} naming `label` when the address must not get the token
+ */
+export function assertSecureAddress(address, label) {
+  let url;
+  try {
+    url = new URL(address);
+  } catch {
+    throw new Error(
+      `${label} "${address}" is not a valid URL — ` +
+        `refusing to send the access token to it`
+    );
+  }
+  if (url.protocol !== "https:" && !LOOPBACK_HOSTNAMES.has(url.hostname)) {
+    throw new Error(
+      `${label} ${address} is not https — the access ` +
+        `token would travel in clear text; refusing to send it there`
+    );
+  }
+  return url;
 }
 
 /** Best-effort `open`/`xdg-open`; the printed URL is the real interface. */
@@ -297,6 +307,11 @@ export async function runPatientAccess({
           `pass the imaging FHIR base explicitly with --imaging-url`
       );
       return 1;
+    }
+    if (!values["imaging-url"]) {
+      // The search sends the token to the discovered server, so the
+      // server-supplied address gets the same https gate as Endpoints.
+      assertSecureAddress(imagingBase, "discovered imaging server");
     }
 
     // 2. Authorization — skipped entirely with --token.

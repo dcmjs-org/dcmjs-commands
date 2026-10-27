@@ -421,6 +421,32 @@ describe("endpoint policy (the token only goes where it belongs)", () => {
     output: "/tmp/pa-out",
   };
 
+  test("an http imaging server from discovery is refused before the search", async () => {
+    const calls = mockGlobalFetch([
+      [
+        "/.well-known/smart-configuration",
+        jsonResponse({
+          ...SMART_CONFIG,
+          associated_endpoints: [
+            {
+              url: "http://img.example/fhir",
+              capabilities: ["smart-imaging-access"],
+            },
+          ],
+        }),
+      ],
+    ]);
+    const { code, err } = await run({
+      "fhir-url": "https://ehr.example/fhir",
+      token: "tok",
+      patient: "p1",
+      "dry-run": true,
+    });
+    expect(code).toBe(1);
+    expect(err).toMatch(/discovered imaging server .* not https/);
+    expect(calls.some((c) => c.url.includes("/ImagingStudy"))).toBe(false);
+  });
+
   test("an http endpoint is refused before any retrieval", async () => {
     mockGlobalFetch([
       [
