@@ -34,9 +34,15 @@ const first = (dict, tag) => dict[tag]?.Value?.[0];
 
 /**
  * The PhotometricInterpretation after `source` → `target`, or throws for a
- * colour model that the target codec would misread.
+ * colour model that the target codec would misread. `lossy` is whether this
+ * encode loses data; JPEG XL with `--lossless` does not.
  */
-export function photometricAfter({ photometric, sourceUid, target }) {
+export function photometricAfter({
+  photometric,
+  sourceUid,
+  target,
+  lossy = target.lossy,
+}) {
   if (isBitstreamTranscode(sourceUid, target.uid)) {
     return photometric;
   }
@@ -54,7 +60,7 @@ export function photometricAfter({ photometric, sourceUid, target }) {
   if (
     target.encapsulated &&
     !target.bytePreserving &&
-    (decoded === "YBR_FULL" || (target.lossy && decoded === "PALETTE COLOR"))
+    (decoded === "YBR_FULL" || (lossy && decoded === "PALETTE COLOR"))
   ) {
     throw new Error(
       `PhotometricInterpretation ${photometric} cannot be written as ` +

@@ -64,6 +64,7 @@ function remapUids(dict, map) {
 
 /**
  * Reads the header of each file and gives each identifying UID a new one.
+ * A file whose header cannot be read is skipped here.
  *
  * @returns {Promise<{ map: Map<string, string>, series: Map<string, string>,
  *   rewrite: (meta: object, dict: object) => void }>} `rewrite` changes a
@@ -74,7 +75,13 @@ export async function planNewSeries({ dcmjs, files, now = new Date() }) {
   const map = new Map();
   const series = new Map();
   for (const file of files) {
-    const { dict } = await readPart10Header({ dcmjs, inputPath: file });
+    let dict;
+    try {
+      ({ dict } = await readPart10Header({ dcmjs, inputPath: file }));
+    } catch {
+      // The copy of this file fails on its own and is reported then.
+      continue;
+    }
     for (const tag of IDENTITY_TAGS) {
       const uid = dict[tag]?.Value?.[0];
       if (uid && !map.has(uid)) {

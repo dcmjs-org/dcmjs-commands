@@ -283,8 +283,17 @@ test("--in-place keeps focal planes apart, and places levels that have no plane 
     expect(fs.existsSync(wsi.half.path)).toBe(true);
     // Several focal planes keep the sparse layout, and with it the Z offset.
     expect(base.dict["00209311"].Value[0]).toBe("TILED_SPARSE");
-    const position = base.dict["52009230"].Value[0]["0048021A"].Value[0];
+    const perFrame = base.dict["52009230"].Value;
+    const position = perFrame[0]["0048021A"].Value[0];
     expect(Number(position["0040074A"].Value[0])).toBe(wsi === a ? 0 : 5);
+    // Tile 2 is one tile to the right: slide Y moves by 256 x 0.0005 mm.
+    const next = perFrame[1]["0048021A"].Value[0];
+    expect(Number(next["0040072A"].Value[0])).toBeCloseTo(20, 10);
+    expect(Number(next["0040073A"].Value[0])).toBeCloseTo(40.128, 10);
+    // Column, row and focal plane indices, as the DimensionIndexSequence says.
+    const indices = (i) => perFrame[i]["00209111"].Value[0]["00209157"].Value;
+    expect(indices(0)).toEqual([1, 1, 1]);
+    expect(indices(1)).toEqual([2, 1, 1]);
   }
   // So a second run still tells the planes apart.
   expect((await wsiresize([planes], opts)).code).toBe(0);
@@ -327,6 +336,31 @@ test("a truncated base fails, and leaves the directory as it was", async () => {
   });
   expect(code).toBe(1);
   expect(fs.readdirSync(dir).sort()).toEqual(before);
+});
+
+// User experience: a messy input set does not stop or break the run.
+test("an unreadable file is skipped, and a file given twice is read once", async () => {
+  const dir = path.join(tmpDir, "messy");
+  const wsi = await writeSyntheticWsi(dcmjs, dir);
+  const bad = path.join(dir, "partial.dcm");
+  fs.writeFileSync(
+    bad,
+    Buffer.concat([Buffer.alloc(128), Buffer.from("DICM"), Buffer.alloc(9, 7)])
+  );
+  const { code, err } = await wsiresize([dir, wsi.half.path], {
+    "in-place": true,
+    preset: "jxl-lossless",
+    tile: "256",
+    factor: "4",
+    quiet: true,
+  });
+  // The skipped file counts as a failure, but the slide is rebuilt.
+  expect(code).toBe(1);
+  expect(err).toMatch(/partial\.dcm: skipped/);
+  expect(err).not.toMatch(/ENOENT/);
+  expect(fs.existsSync(wsi.half.path)).toBe(false);
+  const base = await readPart10Header({ dcmjs, inputPath: wsi.base.path });
+  expect(base.meta["00020010"].Value[0]).toBe("1.2.840.10008.1.2.4.110");
 });
 
 test("needs -d or --in-place", async () => {

@@ -216,13 +216,27 @@ function planeKey(dict) {
 /**
  * Pyramids by SeriesInstanceUID, optical path and focal plane:
  * `{ uid, key, base, levels, shared, multiPlane }`. LABEL and OVERVIEW
- * images are left out.
+ * images are left out. A file is read once, also when two inputs hold it;
+ * a file whose header cannot be read goes to `unreadable` and is skipped.
  */
-async function findPyramids(dcmjs, positionals) {
+async function findPyramids(dcmjs, positionals, unreadable) {
   const pyramids = new Map();
+  const seen = new Set();
   for (const input of positionals) {
     for (const file of discoverDicomFiles(input)) {
-      const { meta, dict } = await readPart10Header({ dcmjs, inputPath: file });
+      const resolved = path.resolve(file);
+      if (seen.has(resolved)) {
+        continue;
+      }
+      seen.add(resolved);
+      let header;
+      try {
+        header = await readPart10Header({ dcmjs, inputPath: file });
+      } catch (err) {
+        unreadable.push({ file, error: err.message });
+        continue;
+      }
+      const { meta, dict } = header;
       const imageType = dict["00080008"]?.Value ?? [];
       if (
         first(dict, "00080016") !== VL_WHOLE_SLIDE ||
@@ -396,69 +410,128 @@ const formatDs = (value) => {
 const IMPLIED_PER_FRAME = new Set(["0048021A", "00209111"]);
 
 /**
+ * What a TILED_SPARSE level needs from the base (WR-I3): the slide origin,
+ * the orientation and the PixelSpacing, because the X/Y offsets of each
+ * plane position are Type 1. Throws when one is missing.
+ */
+function slideGeometry({ dict, path: file }, shared) {
+  const origin = dict["00480008"]?.Value?.[0];
+  const orientation = dict["00480102"]?.Value?.map(Number);
+  const spacing =
+    shared["00289110"]?.Value?.[0]?.["00280030"]?.Value?.map(Number);
+  if (!origin || orientation?.length !== 6 || spacing?.length !== 2) {
+    throw new Error(
+      `${file}: a series with several focal planes needs ` +
+        "TotalPixelMatrixOriginSequence, ImageOrientationSlide and " +
+        "PixelSpacing, to give each new tile its slide position"
+    );
+  }
+  return {
+    x: Number(first(origin, "0040072A")),
+    y: Number(first(origin, "0040073A")),
+    orientation,
+    spacing,
+  };
+}
+
+/** An AT value as an 8-digit tag ("0048021E"). */
+const tagOf = (value) =>
+  typeof value === "string" && /^[0-9A-F]{8}$/i.test(value)
+    ? value.toUpperCase()
+    : Number(value).toString(16).padStart(8, "0").toUpperCase();
+
+/**
+ * DimensionIndexValues for each frame, from the base's DimensionIndexSequence:
+ * the 1-based index of the frame's value among the sorted distinct values of
+ * that dimension. A value found in neither the frame nor the shared groups
+ * has index 1.
+ */
+function dimensionIndexValues(dict, shared, items) {
+  const pointers = (dict["00209222"]?.Value ?? []).map((item) =>
+    tagOf(first(item, "00209165"))
+  );
+  if (!pointers.length) {
+    return undefined;
+  }
+  const lookup = (item, tag) => {
+    for (const macro of [item, shared]) {
+      for (const sq of Object.values(macro)) {
+        const value = sq?.Value?.[0]?.[tag]?.Value?.[0];
+        if (value !== undefined) {
+          return value;
+        }
+      }
+    }
+    return undefined;
+  };
+  const values = items.map((item) => pointers.map((tag) => lookup(item, tag)));
+  const ranks = pointers.map((_, d) => {
+    const distinct = [...new Set(values.map((v) => v[d]))].sort(
+      (a, b) => Number(a) - Number(b)
+    );
+    return new Map(distinct.map((v, i) => [v, i + 1]));
+  });
+  return values.map((v) => v.map((value, d) => ranks[d].get(value)));
+}
+
+/**
  * The per-frame groups of a TILED_SPARSE level, for a slide with several
  * focal planes (WR-I3): one plane position per tile in row-major order,
- * with the Z offset of the base, and slide X/Y offsets from the origin and
- * orientation of the base when it has them.
+ * with the Z offset of the base and slide X/Y offsets, and a FrameContent
+ * item with DimensionIndexValues when the base has a DimensionIndexSequence.
  */
-function planePositions({ base, shared, plan, tile }) {
+function planePositions({ base, shared, geometry, plan, tile }) {
   const source = [base.dict["52009229"], base.dict["52009230"]]
     .map((sq) => sq?.Value?.[0]?.["0048021A"]?.Value?.[0])
     .find(Boolean);
-  const origin = base.dict["00480008"]?.Value?.[0];
-  const orientation = base.dict["00480102"]?.Value?.map(Number);
-  const spacing = shared["00289110"]?.Value?.[0]?.["00280030"]?.Value?.map(
-    (v) => Number(v) * plan.scale
-  );
-  const slide =
-    origin && orientation?.length === 6 && spacing
-      ? {
-          x: Number(first(origin, "0040072A")),
-          y: Number(first(origin, "0040073A")),
-        }
-      : undefined;
+  const { orientation } = geometry;
+  const spacing = geometry.spacing.map((v) => v * plan.scale);
   const items = [];
   for (let ty = 0; ty < plan.tilesY; ty++) {
     for (let tx = 0; tx < plan.tilesX; tx++) {
       const col = tx * tile;
       const row = ty * tile;
+      // PixelSpacing is (row spacing, column spacing), in mm.
+      const along = (i) =>
+        orientation[i] * col * spacing[1] +
+        orientation[i + 3] * row * spacing[0];
       const position = {
         "0048021E": { vr: "SL", Value: [col + 1] },
         "0048021F": { vr: "SL", Value: [row + 1] },
+        "0040072A": { vr: "DS", Value: [formatDs(geometry.x + along(0))] },
+        "0040073A": { vr: "DS", Value: [formatDs(geometry.y + along(1))] },
       };
       if (source?.["0040074A"]) {
         position["0040074A"] = structuredClone(source["0040074A"]);
       }
-      if (slide) {
-        // PixelSpacing is (row spacing, column spacing), in mm.
-        const along = (i) =>
-          orientation[i] * col * spacing[1] +
-          orientation[i + 3] * row * spacing[0];
-        position["0040072A"] = {
-          vr: "DS",
-          Value: [formatDs(slide.x + along(0))],
-        };
-        position["0040073A"] = {
-          vr: "DS",
-          Value: [formatDs(slide.y + along(1))],
-        };
-      }
       items.push({ "0048021A": { vr: "SQ", Value: [position] } });
     }
   }
+  const indices = dimensionIndexValues(base.dict, shared, items);
+  indices?.forEach((values, i) => {
+    items[i]["00209111"] = {
+      vr: "SQ",
+      Value: [{ "00209157": { vr: "UL", Value: values } }],
+    };
+  });
   return items;
 }
 
 /**
  * The shared functional groups item of the new levels: the base's shared
- * groups, plus each per-frame macro (for example PixelMeasures) that is the
- * same in every frame. Throws when such a macro differs between frames,
- * because one TILED_FULL level cannot hold it.
+ * groups without the macros that each level gets new, plus each per-frame
+ * macro (for example PixelMeasures) that is the same in every frame. Throws
+ * when such a macro differs between frames, or is missing in some, because
+ * one shared item cannot hold it.
  */
 function sharedGroups({ dict, path: file }) {
   const shared = structuredClone(dict["52009229"]?.Value?.[0] ?? {});
+  for (const tag of IMPLIED_PER_FRAME) {
+    delete shared[tag];
+  }
   const perFrame = dict["52009230"]?.Value ?? [];
-  for (const tag of Object.keys(perFrame[0] ?? {})) {
+  const tags = new Set(perFrame.flatMap((item) => Object.keys(item)));
+  for (const tag of tags) {
     if (IMPLIED_PER_FRAME.has(tag) || shared[tag]) {
       continue;
     }
@@ -466,7 +539,7 @@ function sharedGroups({ dict, path: file }) {
     if (perFrame.some((item) => JSON.stringify(item[tag]) !== value)) {
       throw new Error(
         `${file}: the per-frame functional group (${tag}) differs between ` +
-          "frames, so it cannot move to a TILED_FULL level"
+          "frames, so it cannot move to the shared groups of a new level"
       );
     }
     shared[tag] = structuredClone(perFrame[0][tag]);
@@ -486,7 +559,7 @@ function backgroundFor(photometric) {
 function levelDataset({
   base,
   shared,
-  sparse,
+  geometry,
   plan,
   options,
   photometric,
@@ -502,11 +575,11 @@ function levelDataset({
   const { tile, factor, target } = options;
 
   dict["52009229"] = { vr: "SQ", Value: [structuredClone(shared)] };
+  const sparse = Boolean(geometry);
   if (sparse) {
-    delete dict["52009229"].Value[0]["0048021A"];
     dict["52009230"] = {
       vr: "SQ",
-      Value: planePositions({ base, shared, plan, tile }),
+      Value: planePositions({ base, shared, geometry, plan, tile }),
     };
   }
   for (const tag of CONCATENATION_TAGS) {
@@ -593,6 +666,7 @@ async function resizeSeries({
   checkBase(base);
   checkPyramid(group);
   const shared = sharedGroups(base);
+  const geometry = group.multiPlane ? slideGeometry(base, shared) : undefined;
   // Before any file exists, so an off-grid tile leaves nothing behind.
   const frameCount = Number(first(base.dict, "00280008") ?? 1);
   const position = tilePosition(base.dict);
@@ -757,7 +831,7 @@ async function resizeSeries({
       const { meta, dict } = levelDataset({
         base,
         shared,
-        sparse: group.multiPlane,
+        geometry,
         plan: output.plan,
         options,
         photometric,
@@ -846,11 +920,15 @@ export async function runWsiResize({
   const dryRun = Boolean(values["dry-run"]);
 
   let groups;
+  const unreadable = [];
   try {
-    groups = await findPyramids(dcmjs, positionals);
+    groups = await findPyramids(dcmjs, positionals, unreadable);
   } catch (err) {
     stderr(`dcmjs wsiresize: ${err.message}`);
     return 1;
+  }
+  for (const { file, error } of unreadable) {
+    stderr(`dcmjs wsiresize: ${file}: skipped, ${error}`);
   }
   if (!groups.length) {
     stderr("dcmjs wsiresize: no VL Whole Slide Microscopy pyramid found");
@@ -881,7 +959,7 @@ export async function runWsiResize({
   };
 
   const reports = [];
-  let failed = 0;
+  let failed = unreadable.length;
   const progress = new Progress({
     command: "wsiresize",
     totalFiles: groups.length,
@@ -925,6 +1003,7 @@ export async function runWsiResize({
           inPlace,
           dryRun,
           series: reports,
+          unreadable: unreadable.length ? unreadable : undefined,
         },
         null,
         2

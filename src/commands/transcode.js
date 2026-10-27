@@ -245,6 +245,7 @@ export async function transcodeFile({
             photometric: dict["00280004"]?.Value?.[0],
             sourceUid,
             target,
+            lossy: Boolean(lossyTarget),
           });
         }
         if (!skip && lossy && !allowLossy) {

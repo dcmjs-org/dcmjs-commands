@@ -190,8 +190,12 @@ rules:
   layout, `TILED_SPARSE`, because PS3.3 gives TILED_FULL no per-frame plane position for the
   Z offset. Each tile then gets a PlanePositionSlideSequence item, in row-major order, with
   its column and row position, the Z offset of the base, and slide X/Y offsets from the
-  TotalPixelMatrixOriginSequence, ImageOrientationSlide and PixelSpacing when the base has
-  them.
+  TotalPixelMatrixOriginSequence, ImageOrientationSlide and PixelSpacing. The X/Y offsets are
+  Type 1, so a base without these three is refused before the decode. When the base has a
+  DimensionIndexSequence, each tile also gets a FrameContentSequence item whose
+  DimensionIndexValues are the 1-based index of the tile's value among the sorted distinct
+  values of each dimension. A plane position or a frame content in the shared groups of the
+  base is never copied to a new level.
 - **WR-I4.** Only 8-bit samples, one or three samples per pixel, and one focal plane and
   one optical path in each image are supported. A concatenation of more than one part is
   refused.
@@ -200,7 +204,10 @@ rules:
   the shared groups, else from the first frame). A level without a plane position joins the
   one focal plane of its optical path. When the optical path has several focal planes, such
   a level cannot be placed, and the command leaves it as it is. LABEL and OVERVIEW images are
-  not grouped. The command refuses a group with two full-size VOLUME images, because then it
+  not grouped. A file that two inputs hold is read once. A file whose header cannot be read
+  is reported on stderr, counted as a failure, and skipped; the other series still run.
+  `transcode --new-series` skips such a file in its UID plan, and the copy step reports it.
+  The command refuses a group with two full-size VOLUME images, because then it
   cannot tell the pyramids apart. With `-d`, a series that has more than one group gets file
   names `<SOPInstanceUID>.dcm` in place of `level-<n>.dcm`.
 - **WR-I8.** The new files replace the old ones by rename, the base last. If a rename

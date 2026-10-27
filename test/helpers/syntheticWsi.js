@@ -102,6 +102,14 @@ async function writeLevel(
     TotalPixelMatrixRows: height,
     TotalPixelMatrixFocalPlanes: 1,
     NumberOfOpticalPaths: 1,
+    // Slide X increases down the rows, slide Y across the columns.
+    TotalPixelMatrixOriginSequence: [
+      {
+        XOffsetInSlideCoordinateSystem: 20,
+        YOffsetInSlideCoordinateSystem: 40,
+      },
+    ],
+    ImageOrientationSlide: [0, 1, 0, 1, 0, 0],
     DimensionOrganizationType: order ? "TILED_SPARSE" : "TILED_FULL",
     SharedFunctionalGroupsSequence: [
       {
@@ -126,6 +134,15 @@ async function writeLevel(
   };
   if (!order) {
     delete dataset.PerFrameFunctionalGroupsSequence;
+  }
+  if (order && zOffset !== undefined) {
+    // Frames indexed by column, row and focal plane.
+    dataset.DimensionIndexSequence = [0x0048021e, 0x0048021f, 0x0040074a].map(
+      (pointer) => ({
+        DimensionIndexPointer: pointer,
+        FunctionalGroupPointer: 0x0048021a,
+      })
+    );
   }
   if (opticalPath) {
     dataset.OpticalPathSequence = [{ OpticalPathIdentifier: opticalPath }];
