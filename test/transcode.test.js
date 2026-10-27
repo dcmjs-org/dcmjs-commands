@@ -339,6 +339,73 @@ test("a file given twice is transcoded once, and two inputs cannot write one out
   });
   expect(both.code).toBe(1);
   expect(both.err).toMatch(/is already the output of/);
+
+  // -d into the input directory would replace the inputs (TC-U2).
+  const before = fs.readFileSync(path.join(study1, "seg.dcm"));
+  const itself = await transcode([study1], {
+    to: "rle",
+    directory: study1,
+    quiet: true,
+  });
+  expect(itself.code).toBe(1);
+  expect(itself.err).toMatch(/would replace/);
+  expect(fs.readFileSync(path.join(study1, "seg.dcm")).equals(before)).toBe(
+    true
+  );
+});
+
+// API: a copy keeps fragments that are not one per frame, as video has.
+test("--new-series copies a video whose fragments are not one per frame", async () => {
+  const { DicomMetaDictionary, DicomDict } = dcmjs.data;
+  const MPEG2 = "1.2.840.10008.1.2.4.100";
+  const sop = DicomMetaDictionary.uid();
+  const dict = DicomMetaDictionary.denaturalizeDataset({
+    SOPClassUID: "1.2.840.10008.5.1.4.1.1.77.1.4.1",
+    SOPInstanceUID: sop,
+    SeriesInstanceUID: DicomMetaDictionary.uid(),
+    Modality: "ES",
+    NumberOfFrames: 3,
+    Rows: 16,
+    Columns: 16,
+    SamplesPerPixel: 3,
+    PhotometricInterpretation: "YBR_PARTIAL_420",
+    BitsAllocated: 8,
+    BitsStored: 8,
+    HighBit: 7,
+    PixelRepresentation: 0,
+  });
+  // Two fragments of one stream for three frames.
+  dict["7FE00010"] = {
+    vr: "OB",
+    Value: [crypto.randomBytes(40), crypto.randomBytes(24)].map((b) =>
+      b.buffer.slice(b.byteOffset, b.byteOffset + b.length)
+    ),
+  };
+  const meta = DicomMetaDictionary.denaturalizeDataset({
+    FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
+    MediaStorageSOPClassUID: "1.2.840.10008.5.1.4.1.1.77.1.4.1",
+    MediaStorageSOPInstanceUID: sop,
+    TransferSyntaxUID: MPEG2,
+  });
+  const source = path.join(tmpDir, "video");
+  fs.mkdirSync(source, { recursive: true });
+  const part10 = new DicomDict(meta);
+  part10.dict = dict;
+  fs.writeFileSync(
+    path.join(source, "video.dcm"),
+    Buffer.from(part10.write({ fragmentMultiframe: false }))
+  );
+
+  const out = path.join(tmpDir, "video-copy");
+  const result = await transcode([source], {
+    "new-series": true,
+    directory: out,
+    quiet: true,
+  });
+  expect(result.code).toBe(0);
+  expect(await frameHashes(path.join(out, "video.dcm"))).toEqual(
+    await frameHashes(path.join(source, "video.dcm"))
+  );
 });
 
 // User experience: a header that cannot split the pixel data changes nothing.

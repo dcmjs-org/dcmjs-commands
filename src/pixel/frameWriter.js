@@ -15,25 +15,35 @@ const MAX_BOT_OFFSET = 0xffffffff;
 /** Extended Offset Table and its lengths (7FE0,0001/0002). */
 const OFFSET_TABLE_TAGS = new Set(["7FE00001", "7FE00002"]);
 
-/** An append-only temp file of frames, next to `nearPath`. */
+/**
+ * An append-only temp file of frames, next to `nearPath`. The file is
+ * created on the first append (or on close), so a skipped input makes none.
+ */
 export class FrameSpool {
   constructor(nearPath) {
     this.path = path.join(
       path.dirname(nearPath),
       `.${path.basename(nearPath)}.${crypto.randomBytes(4).toString("hex")}.frames`
     );
+    this.lengths = [];
+    this.bytes = 0;
+  }
+
+  open() {
+    if (this.out) {
+      return;
+    }
     this.out = fs.createWriteStream(this.path);
     // Kept and thrown from append/close, so that a failed open or write
     // is a per-file error, not an unhandled 'error' event.
     this.out.on("error", (err) => {
       this.error ??= err;
     });
-    this.lengths = [];
-    this.bytes = 0;
   }
 
   /** Appends a copy of `frame`; the caller may reuse its buffer at once. */
   async append(frame) {
+    this.open();
     if (this.error) {
       throw this.error;
     }
@@ -49,6 +59,7 @@ export class FrameSpool {
   }
 
   async close() {
+    this.open();
     if (!this.out.closed) {
       this.out.end();
       await once(this.out, "close");
@@ -84,7 +95,7 @@ export class FrameSpool {
   async remove() {
     // The open is asynchronous: wait for the stream to close, or a late
     // open would create the file again after the unlink.
-    if (!this.out.closed) {
+    if (this.out && !this.out.closed) {
       const closed = once(this.out, "close").catch(() => {});
       this.out.destroy();
       await closed;

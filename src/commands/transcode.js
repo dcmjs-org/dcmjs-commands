@@ -170,6 +170,8 @@ function keepSyntax(sourceUid) {
   };
 }
 
+const ICON_IMAGE_SEQUENCE = "00880200";
+
 /** Little endian native frames are the same bytes in Explicit VR LE. */
 const LITTLE_ENDIAN_NATIVE = new Set([
   "1.2.840.10008.1.2",
@@ -305,7 +307,9 @@ export async function transcodeFile({
       return skip ? { skipped: skip, before } : { before, sourceUid: fileUid };
     }
 
-    if (read.hasPixelData) {
+    // Copied frames keep their fragments, which need not be one per frame
+    // (video); only decoded frames must match NumberOfFrames.
+    if (read.hasPixelData && !copyFrames) {
       checkFrameCount(read);
     }
     const { meta, dict } = read;
@@ -320,6 +324,8 @@ export async function transcodeFile({
     } else if (copyFrames) {
       meta["00020010"] = { vr: "UI", Value: [target.uid] };
     } else {
+      // The icon keeps the old encoding; it is Type 3, so it goes.
+      delete dict[ICON_IMAGE_SEQUENCE];
       updatePixelHeader({
         meta,
         dict,
@@ -387,6 +393,20 @@ export async function runTranscode({
     inputs = collectInputs(positionals);
   } catch (err) {
     stderr(`dcmjs transcode: ${err.message}`);
+    return 1;
+  }
+  // -d must never replace an input (TC-U2).
+  const intoItself = outDir
+    ? inputs.find(
+        ([file, root]) =>
+          path.resolve(outDir, path.relative(root, file)) === path.resolve(file)
+      )
+    : undefined;
+  if (intoItself) {
+    stderr(
+      `dcmjs transcode: -d ${outDir} would replace ${intoItself[0]}; give a ` +
+        "different directory, or leave out -d to convert in place"
+    );
     return 1;
   }
 

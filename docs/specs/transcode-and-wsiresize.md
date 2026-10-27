@@ -126,7 +126,8 @@ rules:
   frame, because an encoder can return a buffer that the caller reuses for the next tile.
   The spool keeps the first stream error and throws it from `append` and `close`, so a
   failed open or write is an error of that file, not of the whole run. `remove` waits for the
-  stream to close before it deletes the file, because the open is asynchronous.
+  stream to close before it deletes the file, because the open is asynchronous. The spool
+  file is created on the first append (or on `close`), so a skipped input makes none.
 - **PX-I4.** The writer drops elements after PixelData, because they cannot follow new
   pixel data, and reports their tags. The writer drops the Extended Offset Table and its
   lengths (7FE0,0001/0002) of the source, whatever the caller passes, because they do not
@@ -145,7 +146,11 @@ rules:
   callback throws.
 - **PX-I9.** `nativeFrameBytes` throws when Rows, Columns or BitsAllocated is not a positive
   whole number. `transcode` checks this before a decode. Both commands check that the
-  number of frames read equals NumberOfFrames before they write a file.
+  number of frames read equals NumberOfFrames before they write decoded frames. Frames that
+  are only copied keep their fragments, which need not be one per frame (video), so they
+  are not checked. When the pixel data is re-encoded, the Icon Image Sequence (0088,0200)
+  is dropped, because it keeps the old encoding and is Type 3. Little endian native frames
+  do not go through the codec, which would only hand them back.
 - **PX-I6.** Output files go to a temporary file in the target directory, and a rename puts
   each file in its final location.
 - **PX-I7.** `Progress` (`src/pixel/progress.js`) writes lines, not carriage returns, so the
@@ -174,7 +179,8 @@ rules:
   file of this syntax becomes Explicit VR Little Endian.
 - **TC-I5.** A file that two inputs hold is transcoded once. With `-d`, a file whose output
   path is already the output of another input fails with an error, and the first output
-  stays.
+  stays. A `-d` directory that would map an input onto itself is refused before any work,
+  because `-d` must never replace an input (TC-U2).
 
 ### `dcmjs wsiresize`
 

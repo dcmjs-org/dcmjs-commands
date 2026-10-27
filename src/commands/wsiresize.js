@@ -606,6 +606,8 @@ function levelDataset({
   for (const tag of CONCATENATION_TAGS) {
     delete dict[tag];
   }
+  // The base icon keeps the old encoding; it is Type 3, so it goes.
+  delete dict["00880200"];
   set(
     dict,
     "00080008",
