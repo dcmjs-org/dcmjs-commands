@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { discoverDicomFiles } from "../io.js";
+import { discoverDicomFiles, pathKey } from "../io.js";
 import { checkFrameCount, readPart10Frames } from "../pixel/frameReader.js";
 import { FrameSpool, writePart10WithFrames } from "../pixel/frameWriter.js";
 import {
@@ -133,24 +133,8 @@ export function parseTranscodeOptions(values) {
   };
 }
 
-const foldCase = process.platform === "win32" || process.platform === "darwin";
-
-/**
- * A key that two names of one file share: the real path of the nearest
- * folder that exists (through symlinks, junctions and mapped drives), the
- * rest of the path, and no case on Windows and macOS. Outputs need not
- * exist yet.
- */
-function pathKey(file) {
-  let dir = path.resolve(file);
-  const rest = [];
-  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) {
-    rest.unshift(path.basename(dir));
-    dir = path.dirname(dir);
-  }
-  const key = path.join(fs.realpathSync.native(dir), ...rest);
-  return foldCase ? key.toLowerCase() : key;
-}
+/** Output paths collide without case where the file system ignores it. */
+const outputKey = (file) => pathKey(file, { foldCase: true });
 
 /**
  * [file, root] pairs for every DICOM file under the inputs. A file that two
@@ -422,10 +406,10 @@ export async function runTranscode({
   }
   // -d must never replace an input (TC-U15): no output path may be the
   // path of any input.
-  const inputKeys = new Set(inputs.map(([file]) => pathKey(file)));
+  const inputKeys = new Set(inputs.map(([file]) => outputKey(file)));
   const replaced = outDir
     ? inputs.find(([file, root]) =>
-        inputKeys.has(pathKey(path.join(outDir, path.relative(root, file))))
+        inputKeys.has(outputKey(path.join(outDir, path.relative(root, file))))
       )
     : undefined;
   if (replaced) {
@@ -468,7 +452,7 @@ export async function runTranscode({
       : inputPath;
     try {
       // Two inputs with the same relative path would write one file.
-      const key = pathKey(outputPath);
+      const key = outputKey(outputPath);
       const earlier = outputs.get(key);
       if (earlier) {
         throw new Error(

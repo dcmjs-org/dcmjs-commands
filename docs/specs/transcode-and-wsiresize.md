@@ -74,9 +74,10 @@ rules:
   PlanarConfiguration 0.
 - **TC-U14.** A thumbnail (Icon Image Sequence) stays in the output when its pixel data is
   native, because a native thumbnail is valid in any transfer syntax. An encapsulated
-  thumbnail is dropped from every file that the command writes, copies included, because
-  it cannot be written correctly. This applies to `transcode` and to every level that
-  `wsiresize` writes.
+  thumbnail is dropped from every file whose header the command writes (re-encoded files,
+  and `--new-series` copies), because it cannot be written correctly. A file that `-d`
+  copies byte for byte, because it needs no change, keeps its thumbnail as it is. This
+  applies to `transcode` and to every level that `wsiresize` writes.
 - **TC-U15.** With `-d`, the command refuses the whole run, before any work, when an output
   path would be the path of any input, so `-d` never replaces an input (TC-U2). Two names of
   one file count as one path: through symlinks, junctions and mapped drives, and without
@@ -192,9 +193,10 @@ rules:
   file of this syntax becomes Explicit VR Little Endian.
 - **TC-I5.** A file that two inputs hold is transcoded once. With `-d`, a file whose output
   path is already the output of another input fails with an error, and the first output
-  stays. The input dedupe, the TC-U15 check and this collision check compare `pathKey`
-  values: the real path of the nearest existing folder (`fs.realpathSync.native`), the rest
-  of the path, and lower case on Windows and macOS.
+  stays. The input dedupe of both commands compares `pathKey` (in `src/io.js`): the real
+  path of the nearest existing folder (`fs.realpathSync.native`, in its stored case) and the
+  rest of the path. The TC-U15 check and this collision check also fold case on Windows
+  and macOS. A path that cannot be resolved keys as itself.
 
 ### `dcmjs wsiresize`
 
@@ -224,13 +226,13 @@ rules:
   sets TotalPixelMatrixFocalPlanes and NumberOfOpticalPaths to 1 (Type 1C for TILED_FULL).
 - **WR-I4.** Only 8-bit samples, one or three samples per pixel, and one focal plane and
   one optical path in each image are supported. The count attributes are optional for
-  TILED_SPARSE, so an image whose per-frame plane positions hold more than one Z offset, or
-  the same tile position twice, is refused too. A concatenation of more than one part is
-  refused.
+  TILED_SPARSE, so a base whose frames hold the same tile position twice is refused too. A
+  Z offset that varies from tile to tile, at distinct positions, is the focus map of one
+  plane and is accepted. A concatenation of more than one part is refused.
 - **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
   the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the plane position (from
-  the shared groups, else from the first frame). A level without a plane position joins the
-  one focal plane of its optical path. When the optical path has several focal planes, such
+  the shared groups, else from the frames when all frames share one Z offset; a focus map
+  gives no Z key). A level without a Z key joins the one focal plane of its optical path. When the optical path has several focal planes, such
   a level cannot be placed, and the command leaves it as it is. LABEL and OVERVIEW images are
   not grouped. A file that two inputs hold is read once. A file whose header cannot be read
   is reported on stderr, counted as a failure, and skipped; the other series still run.

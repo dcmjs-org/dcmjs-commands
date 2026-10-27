@@ -338,28 +338,56 @@ test("a truncated base fails, and leaves the directory as it was", async () => {
   expect(fs.readdirSync(dir).sort()).toEqual(before);
 });
 
-// User experience: an image that holds two focal planes is never merged into one.
-test("a sparse base with frames at two Z offsets is refused, and does not change", async () => {
-  const dir = path.join(tmpDir, "two-z-in-one");
-  const wsi = await writeSyntheticWsi(dcmjs, dir, { zOffset: 0 });
-  // Move frame 1 to another focal plane, without the optional plane count.
-  const bytes = fs.readFileSync(wsi.base.path);
+/** Rewrites the base after `change(dict)`, without the optional plane count. */
+function editBase(file, change) {
+  const bytes = fs.readFileSync(file);
   const part10 = dcmjs.data.DicomMessage.readFile(
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)
   );
   delete part10.dict["00480303"];
-  part10.dict["52009230"].Value[0]["0048021A"].Value[0]["0040074A"].Value = [5];
+  change(part10.dict);
   fs.writeFileSync(
-    wsi.base.path,
+    file,
     Buffer.from(part10.write({ fragmentMultiframe: false }))
   );
-  const before = fs.readFileSync(wsi.base.path);
+}
 
-  const { code, err } = await wsiresize([dir], {
-    "in-place": true,
+// User experience: a per-tile focus map is one plane; two planes in one
+// image are never merged into one.
+test("a sparse base with a focus map is rebuilt, and one with two frames at one tile is refused", async () => {
+  const opts = {
     preset: "jxl-lossless",
+    tile: "256",
+    factor: "4",
     quiet: true,
+  };
+  const positionOf = (dict, i) =>
+    dict["52009230"].Value[i]["0048021A"].Value[0];
+
+  // Each tile has its own autofocus Z offset, at its own position.
+  const mapped = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "focus"), {
+    zOffset: 0,
   });
+  editBase(mapped.base.path, (dict) => {
+    positionOf(dict, 1)["0040074A"].Value = [0.0015];
+  });
+  const focus = await wsiresize([mapped.base.path], {
+    ...opts,
+    directory: path.join(tmpDir, "focus-out"),
+  });
+  expect(focus.code).toBe(0);
+
+  // Frame 1 is a second plane of the tile of frame 0.
+  const dir = path.join(tmpDir, "two-z-in-one");
+  const wsi = await writeSyntheticWsi(dcmjs, dir, { zOffset: 0 });
+  editBase(wsi.base.path, (dict) => {
+    const [first, second] = [positionOf(dict, 0), positionOf(dict, 1)];
+    second["0048021E"].Value = first["0048021E"].Value;
+    second["0048021F"].Value = first["0048021F"].Value;
+    second["0040074A"].Value = [5];
+  });
+  const before = fs.readFileSync(wsi.base.path);
+  const { code, err } = await wsiresize([dir], { ...opts, "in-place": true });
   expect(code).toBe(1);
   expect(err).toMatch(/more than one focal plane/);
   expect(fs.readFileSync(wsi.base.path).equals(before)).toBe(true);

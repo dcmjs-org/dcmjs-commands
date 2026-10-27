@@ -163,11 +163,10 @@ export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
   // Little endian native frames are already samples; the codec would only
   // hand them back.
   if (isLittleEndianNative(transferSyntaxUID)) {
-    // A 16-bit view needs an even offset, as the codec's decoder ensured.
-    const aligned =
-      imageInfo.bitsAllocated > 8 && frame.byteOffset % 2
-        ? frame.slice()
-        : frame;
+    // A 16- or 32-bit view needs an offset that is a multiple of the sample
+    // size, as the fresh buffer of the codec's decoder had.
+    const sampleBytes = Math.ceil(imageInfo.bitsAllocated / 8);
+    const aligned = frame.byteOffset % sampleBytes ? frame.slice() : frame;
     return nativeToInterleaved(aligned, imageInfo);
   }
   if (imageInfo.bitsAllocated === 1) {

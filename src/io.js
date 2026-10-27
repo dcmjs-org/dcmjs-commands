@@ -20,6 +20,32 @@ export function toArrayBuffer(buffer) {
   );
 }
 
+/**
+ * A key that two names of one file share: the real path of the nearest
+ * folder that exists (through symlinks, junctions and mapped drives, in its
+ * stored case), then the rest of the path, which need not exist yet. With
+ * `foldCase`, the key has no case on Windows and macOS, where the default
+ * file systems ignore it. A path that cannot be resolved keys as itself.
+ */
+export function pathKey(file, { foldCase = false } = {}) {
+  let dir = path.resolve(file);
+  const rest = [];
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) {
+    rest.unshift(path.basename(dir));
+    dir = path.dirname(dir);
+  }
+  let key;
+  try {
+    key = path.join(fs.realpathSync.native(dir), ...rest);
+  } catch {
+    key = path.resolve(file);
+  }
+  return foldCase &&
+    (process.platform === "win32" || process.platform === "darwin")
+    ? key.toLowerCase()
+    : key;
+}
+
 /** Read a file as an exact ArrayBuffer. */
 export function readFileArrayBuffer(filePath) {
   return toArrayBuffer(fs.readFileSync(filePath));

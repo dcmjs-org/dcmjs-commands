@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { discoverDicomFiles } from "../io.js";
+import { discoverDicomFiles, pathKey } from "../io.js";
 import {
   checkFrameCount,
   readPart10Frames,
@@ -208,12 +208,16 @@ function planeKey(dict) {
   const paths = (dict["00480105"]?.Value ?? [])
     .map((item) => first(item, "00480106"))
     .join("\\");
-  // The shared item usually holds only PixelMeasures, so fall back to the
-  // first frame for the plane position.
-  const position = [dict["52009229"], dict["52009230"]]
-    .map((sq) => sq?.Value?.[0]?.["0048021A"]?.Value?.[0])
-    .find(Boolean);
-  const z = position ? first(position, "0040074A") : undefined;
+  // The shared item usually holds only PixelMeasures, so the plane position
+  // comes from the frames. A Z offset that varies from tile to tile is the
+  // focus map of one plane, not a focal plane, so it gives no key.
+  const shared = dict["52009229"]?.Value?.[0]?.["0048021A"]?.Value?.[0];
+  const zs = shared
+    ? [first(shared, "0040074A")]
+    : (dict["52009230"]?.Value ?? []).map((item) =>
+        first(item["0048021A"]?.Value?.[0] ?? {}, "0040074A")
+      );
+  const z = new Set(zs.map(String)).size === 1 ? zs[0] : undefined;
   return { paths, z: z === undefined ? "" : String(z) };
 }
 
@@ -228,7 +232,7 @@ async function findPyramids(dcmjs, positionals, unreadable) {
   const seen = new Set();
   for (const input of positionals) {
     for (const file of discoverDicomFiles(input)) {
-      const resolved = path.resolve(file);
+      const resolved = pathKey(file);
       if (seen.has(resolved)) {
         continue;
       }
@@ -291,20 +295,15 @@ async function findPyramids(dcmjs, positionals, unreadable) {
 }
 
 /**
- * Refuses an image with more than one focal plane or optical path. The
- * count attributes are optional for TILED_SPARSE, so the Z offsets of the
- * per-frame plane positions are checked too.
+ * Refuses an image with more than one focal plane or optical path by its
+ * count attributes. The counts are optional for TILED_SPARSE, so the base
+ * is also refused when two frames share a tile position (rasterOrder); a
+ * varying Z offset alone is a focus map, which is allowed.
  */
 function checkPlanes({ dict, path: file }) {
-  const zOffsets = new Set(
-    (dict["52009230"]?.Value ?? []).map((item) =>
-      first(item["0048021A"]?.Value?.[0] ?? {}, "0040074A")
-    )
-  );
   if (
     Number(first(dict, "00480303") ?? 1) > 1 ||
-    Number(first(dict, "00480302") ?? 1) > 1 ||
-    zOffsets.size > 1
+    Number(first(dict, "00480302") ?? 1) > 1
   ) {
     throw new Error(
       `${file}: more than one focal plane or optical path in one image is ` +
@@ -416,8 +415,8 @@ function rasterOrder(position, frameCount) {
   if (twice) {
     throw new Error(
       `frames ${sorted[sorted.indexOf(twice) - 1].i + 1} and ${twice.i + 1} ` +
-        `are both at (${twice.x + 1}, ${twice.y + 1}); one tile for each ` +
-        "position is supported"
+        `are both at (${twice.x + 1}, ${twice.y + 1}); more than one focal ` +
+        "plane or optical path in one image is not supported"
     );
   }
   return sorted.every((f, k) => f.i === k) ? undefined : sorted.map((f) => f.i);
