@@ -167,14 +167,18 @@ describe("StaticDicomWebInstance.storeBulkdataItem", () => {
     });
     expect(Buffer.from(wrapped.buffer).equals(payload)).toBe(true);
 
-    // raw file (no leading boundary line): returned byte for byte
-    const rawPath = path.resolve(instance.url, "../..", "bulkdata/raw.bin");
-    fs.mkdirSync(path.dirname(rawPath), { recursive: true });
-    fs.writeFileSync(rawPath, payload);
-    const raw = await instance.openBulkdata("00282000", {
-      BulkDataURI: "bulkdata/raw.bin",
-    });
-    expect(Buffer.from(raw.buffer).equals(payload)).toBe(true);
+    // raw files, including one that looks like a boundary line: returned
+    // byte for byte
+    const lookalike = Buffer.from("--x\r\nab\r\n\r\ncd\r\n--x", "latin1");
+    for (const bytes of [payload, lookalike]) {
+      const rawPath = path.resolve(instance.url, "../..", "bulkdata/raw.bin");
+      fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+      fs.writeFileSync(rawPath, bytes);
+      const raw = await instance.openBulkdata("00282000", {
+        BulkDataURI: "bulkdata/raw.bin",
+      });
+      expect(Buffer.from(raw.buffer).equals(bytes)).toBe(true);
+    }
   });
 
   test("second store of identical bulkdata is a no-op (dedup by hash)", async () => {

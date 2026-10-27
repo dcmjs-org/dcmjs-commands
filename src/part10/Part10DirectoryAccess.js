@@ -46,6 +46,8 @@ export class Part10DirectoryAccess extends DicomAccess {
 
     const groups = new Map();
     const skipped = [];
+    // SOP UIDs are unique across the whole tree, not only within a series
+    const bySopUID = new Map();
     for (const filePath of files) {
       let entry = null;
       try {
@@ -74,7 +76,7 @@ export class Part10DirectoryAccess extends DicomAccess {
         instances = new Map();
         series.set(entry.seriesUID, instances);
       }
-      const kept = instances.get(entry.sopUID);
+      const kept = bySopUID.get(entry.sopUID);
       if (kept) {
         dicomIssueLog.warn(
           "Skipping duplicate SOPInstanceUID",
@@ -89,6 +91,7 @@ export class Part10DirectoryAccess extends DicomAccess {
         continue;
       }
       instances.set(entry.sopUID, entry);
+      bySopUID.set(entry.sopUID, entry);
     }
     log.info(
       "Scanned",

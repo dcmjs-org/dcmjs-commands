@@ -45,12 +45,15 @@ export class StaticDicomWebInstance extends InstanceAccess {
   }
 
   /**
-   * Stores bulkdata to the local bulkdata directory from the given source
+   * Stores bulkdata to the local bulkdata directory from the given source.
+   * Only the top-level PixelData is the instance's frames; a nested one
+   * (IconImageSequence) is stored as ordinary bulkdata.
    */
   async storeBulkdata(
     source,
     sourceData = source.jsonData,
-    thisData = this.jsonData
+    thisData = this.jsonData,
+    depth = 0
   ) {
     if (!sourceData || typeof sourceData !== "object") {
       return;
@@ -58,7 +61,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
     for (const [key, child] of Object.entries(sourceData)) {
       if (!child) continue;
       const destChild = thisData[key];
-      if (key === "7FE00010" || key === "7fe00010") {
+      if (depth === 0 && key.toUpperCase() === "7FE00010") {
         destChild.BulkDataURI = `instances/${this.uid}/frames`;
         continue;
       }
@@ -72,7 +75,7 @@ export class StaticDicomWebInstance extends InstanceAccess {
         for (let i = 0; i < child.Value.length; i++) {
           const childI = child.Value[i];
           const destI = destChild.Value[i];
-          await this.storeBulkdata(source, childI, destI);
+          await this.storeBulkdata(source, childI, destI, depth + 1);
         }
       }
     }
@@ -236,17 +239,33 @@ export class StaticDicomWebInstance extends InstanceAccess {
       throw new Error(`bulkdata file not found for tag ${key}: ${filePath}`);
     }
     const raw = fsBase.readFileSync(filePath);
-    // Multipart only when the file opens with a boundary line and closes
-    // with that same boundary; payload bytes alone never decide it.
+    // Multipart only in the writer's exact shape: a boundary line, then a
+    // Content-Type header, and the closing "--<boundary>--" at the end of
+    // the file. Payload bytes alone never decide it.
     const lead = raw.subarray(0, 2).toString("latin1") === "\r\n" ? 2 : 0;
     const boundaryEnd = raw.indexOf("\r\n", lead);
-    const boundary =
+    let boundary =
       raw.subarray(lead, lead + 2).toString("latin1") === "--" &&
       boundaryEnd > lead + 2
         ? raw.toString("latin1", lead + 2, boundaryEnd)
         : null;
-    const headerEnd = boundary ? raw.indexOf("\r\n\r\n", lead) : -1;
-    const trailer = boundary ? raw.lastIndexOf(`\r\n--${boundary}`) : -1;
+    if (
+      boundary &&
+      !/^content-type:/i.test(
+        raw.toString("latin1", boundaryEnd + 2, boundaryEnd + 15)
+      )
+    ) {
+      boundary = null;
+    }
+    const closing = boundary ? `\r\n--${boundary}--` : null;
+    const tail = closing
+      ? raw
+          .toString("latin1", raw.length - closing.length - 2)
+          .replace(/\r\n$/, "")
+      : "";
+    const headerEnd =
+      boundary && tail.endsWith(closing) ? raw.indexOf("\r\n\r\n", lead) : -1;
+    const trailer = headerEnd >= 0 ? raw.lastIndexOf(closing) : -1;
     if (headerEnd < 0 || trailer <= headerEnd) {
       // not multipart-wrapped (encapsulated write): return as-is
       return {

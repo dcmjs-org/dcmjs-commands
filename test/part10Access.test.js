@@ -289,11 +289,55 @@ describe("dcmjs dicomweb command", () => {
     ).toBe(true);
   });
 
+  test("icon PixelData is published as bulkdata that resolves", async () => {
+    const source = path.join(dir, "source");
+    const dest = path.join(dir, "web");
+    writeSourceTree(source);
+    const iconFile = path.join(source, "S1", "IM000001");
+    const buffer = fs.readFileSync(iconFile);
+    const dicomDict = DicomMessage.readFile(
+      buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength
+      )
+    );
+    const iconBytes = Buffer.from([9, 8, 7, 6, 5, 4, 3, 2]);
+    dicomDict.dict["00880200"] = {
+      vr: "SQ",
+      Value: [{ "7FE00010": { vr: "OB", Value: [iconBytes.buffer.slice(0)] } }],
+    };
+    fs.writeFileSync(iconFile, Buffer.from(dicomDict.write()));
+
+    const code = await runDicomweb({
+      dcmjs,
+      positionals: [source],
+      values: { directory: dest },
+      stdout: () => {},
+      stderr: () => {},
+    });
+    expect(code).toBe(0);
+
+    const seriesDir = path.join(
+      dest,
+      "studies",
+      STUDY_UID,
+      "series",
+      "2.25.11"
+    );
+    const metadata = gunzipJson(path.join(seriesDir, "metadata.gz"));
+    const withIcon = metadata.find((m) => m["00880200"]);
+    const uri = withIcon["00880200"].Value[0]["7FE00010"].BulkDataURI;
+    expect(uri).not.toMatch(/frames/);
+    const stored = fs.readFileSync(path.resolve(seriesDir, uri));
+    expect(stored.includes(iconBytes)).toBe(true);
+  });
+
   test("a duplicate SOPInstanceUID is skipped with a warning, not dropped silently", async () => {
     writeSourceTree(dir);
+    // same SOP UID as S1/IM000001, in a different series
     writeInstance(path.join(dir, "S3", "COPY"), {
       sopUid: "2.25.101",
-      seriesUid: "2.25.11",
+      seriesUid: "2.25.33",
       instanceNumber: 1,
     });
     const access = await DicomAccess.createInstance(dir, {});
