@@ -1,31 +1,42 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
-import { readDicom, instanceDicom, dumpDicom } from '../src/index.js';
+// bin/dcmjs.js
+//
+// Entry point for the dcmjs bin. Loads the composite dcmjs surface from
+// src/dcmjsBundle.js and hands it to the router. Tests bypass this file
+// and inject dcmjs directly.
 
-const program = new Command();
+import { runCli } from "../src/cli.js";
+import { exitOnEpipe } from "../src/utils/exitOnEpipe.js";
 
-program
-  .name('dcmjs')
-  .description('dcmjs based tools for manipulation DICOM files')
-  .version('0.0.1')
+// `dcmjs dump file | head` must end quietly when head closes the pipe
+exitOnEpipe();
 
-program.command('dump')
-  .description('Dump a dicom file')
-  .argument('<part10>', 'part 10 file')
-  // .option('-s, --separator <char>', 'separator character', ',')
-  .action(async (fileName, _options) => {
-    const dicomDict = readDicom(fileName);
-    dumpDicom(dicomDict);
-  });
+let dcmjs;
+try {
+  ({ default: dcmjs } = await import("../src/dcmjsBundle.js"));
+} catch (err) {
+  console.error(
+    "dcmjs CLI needs the dcmjs bundle.\n" +
+      `Run \`npm install\` to fetch the @dcmjs-org packages. (${err.message})`
+  );
+  process.exit(1);
+}
 
-program.command('instance')
-  .description('Write the instance data')
-  .argument('<part10>', 'part 10 file')
-  .option('-p, --pretty', 'Pretty print')
-  .action(async (fileName, options) => {
-    const dicomDict = readDicom(fileName);
-    instanceDicom(dicomDict, options);
-  })
+// Parser chatter would drown command output
+dcmjs.log.setLevel("silent");
+dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 
-
-program.parse();
+runCli({
+  dcmjs,
+  argv: process.argv.slice(2),
+  stdout: (text) => process.stdout.write(text + "\n"),
+  stderr: (text) => process.stderr.write(text + "\n"),
+}).then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (err) => {
+    console.error(`dcmjs: ${err.message}`);
+    process.exitCode = 1;
+  }
+);
