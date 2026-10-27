@@ -11,7 +11,6 @@ import os from "os";
 import path from "path";
 import zlib from "zlib";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import { DicomAccess } from "../src/access/DicomAccess.js";
 import { runTransfer } from "../src/commands/webTransfer.js";
 import { runDicomweb } from "../src/commands/dicomweb.js";
@@ -21,8 +20,7 @@ import {
   looksLikePart10Directory,
 } from "../src/io.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 
 const { DicomMessage } = dcmjs.data;
@@ -291,6 +289,72 @@ describe("dcmjs dicomweb command", () => {
     ).toBe(true);
   });
 
+  test("icon PixelData is published as bulkdata that resolves", async () => {
+    const source = path.join(dir, "source");
+    const dest = path.join(dir, "web");
+    writeSourceTree(source);
+    const iconFile = path.join(source, "S1", "IM000001");
+    const buffer = fs.readFileSync(iconFile);
+    const dicomDict = DicomMessage.readFile(
+      buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength
+      )
+    );
+    const iconBytes = Buffer.from([9, 8, 7, 6, 5, 4, 3, 2]);
+    dicomDict.dict["00880200"] = {
+      vr: "SQ",
+      Value: [{ "7FE00010": { vr: "OB", Value: [iconBytes.buffer.slice(0)] } }],
+    };
+    fs.writeFileSync(iconFile, Buffer.from(dicomDict.write()));
+
+    const code = await runDicomweb({
+      dcmjs,
+      positionals: [source],
+      values: { directory: dest },
+      stdout: () => {},
+      stderr: () => {},
+    });
+    expect(code).toBe(0);
+
+    const seriesDir = path.join(
+      dest,
+      "studies",
+      STUDY_UID,
+      "series",
+      "2.25.11"
+    );
+    const metadata = gunzipJson(path.join(seriesDir, "metadata.gz"));
+    const withIcon = metadata.find((m) => m["00880200"]);
+    const uri = withIcon["00880200"].Value[0]["7FE00010"].BulkDataURI;
+    expect(uri).not.toMatch(/frames/);
+    const stored = fs.readFileSync(path.resolve(seriesDir, uri));
+    expect(stored.includes(iconBytes)).toBe(true);
+  });
+
+  test("a duplicate SOPInstanceUID is skipped with a warning, not dropped silently", async () => {
+    writeSourceTree(dir);
+    // same SOP UID as S1/IM000001, in a different series
+    writeInstance(path.join(dir, "S3", "COPY"), {
+      sopUid: "2.25.101",
+      seriesUid: "2.25.33",
+      instanceNumber: 1,
+    });
+    const access = await DicomAccess.createInstance(dir, {});
+    const { skipped, groups } = await access.scan();
+    // the memoized scan holds no bulkdata bytes (they are re-read on demand)
+    for (const series of groups.values()) {
+      for (const instances of series.values()) {
+        for (const entry of instances.values()) {
+          expect(entry.bulkdataMap).toBeNull();
+        }
+      }
+    }
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].file).toMatch(/S3[\\/]COPY$/);
+    expect(skipped[0].error).toMatch(/duplicate SOPInstanceUID 2\.25\.101/);
+  });
+
   test("missing directory prints usage", async () => {
     const err = capture();
     const code = await runDicomweb({
@@ -342,6 +406,33 @@ describe("frame extraction", () => {
     );
     const frame2 = new Uint16Array(extractFrame([pixels.buffer], 2, entry));
     expect(Array.from(frame2)).toEqual(Array.from(pixels.slice(16, 32)));
+  });
+
+  test("1-bit frames are packed with no padding between frames", () => {
+    // 5x5 frames = 25 bits each; frame 2 starts at bit 25 (byte 3, bit 1).
+    const bits = [];
+    for (let frame = 0; frame < 3; frame++) {
+      for (let i = 0; i < 25; i++) {
+        bits.push((i + frame) % 3 === 0 ? 1 : 0);
+      }
+    }
+    const packed = new Uint8Array(Math.ceil(bits.length / 8));
+    bits.forEach((bit, i) => {
+      packed[i >> 3] |= bit << (i % 8);
+    });
+    const entry = entryFor(
+      { Rows: 5, Columns: 5, BitsAllocated: 1, NumberOfFrames: 3 },
+      { encapsulated: false }
+    );
+    for (let frame = 1; frame <= 3; frame++) {
+      const out = new Uint8Array(extractFrame([packed.buffer], frame, entry));
+      expect(out.byteLength).toBe(4);
+      const got = Array.from(
+        { length: 25 },
+        (_, i) => (out[i >> 3] >> (i % 8)) & 1
+      );
+      expect(got).toEqual(bits.slice((frame - 1) * 25, frame * 25));
+    }
   });
 
   test("encapsulated with one fragment per frame maps directly", () => {

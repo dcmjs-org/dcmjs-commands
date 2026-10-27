@@ -45,21 +45,12 @@ APIs, pipeable CLI, SMART-context inputs), see
 
 ## Install
 
-Requires Node >= 22.13. This branch (`release/1.0`, which contains
-the whole arc: the modernized CLI, the dcmjs 1.0 integration, and the
-patient-access command) builds against the **dcmjs 1.0-beta preview** — the
-merge of all ten open dcmjs assembly PRs. The `dcmjs` dependency points at a
-sibling checkout named `dcmjs-integration`, which must be built first:
+Requires Node >= 22.13. The `dcmjs` dependency is the published dcmjs 1.0
+beta (`npm:@dcmjs-org/dcmjs@1.0.0-beta.4`), together with
+`@dcmjs-org/media` and `@dcmjs-org/fhir`, so a plain npm install is enough:
 
 ```bash
-# this package and its dcmjs sibling, side by side — note the branch names
-git clone -b release/1.0 https://github.com/awatson1978/dcmjs-commands.git
-git clone -b integration/1.0-beta-preview https://github.com/awatson1978/dcmjs.git dcmjs-integration
-
-# build the sibling first (pnpm — it is a pnpm workspace)
-(cd dcmjs-integration && pnpm install && pnpm run build)
-
-# then install this package
+git clone https://github.com/dcmjs-org/dcmjs-commands.git
 cd dcmjs-commands
 npm install
 
@@ -397,6 +388,5 @@ npm run format:check  # prettier
 ```
 
 Tests use the committed fixture `test/fixtures/sample-dicom.dcm` plus
-synthesized data — no network and no submodules. CI (GitHub Actions) checks out and builds the sibling dcmjs 1.0-beta
-preview (`awatson1978/dcmjs@integration/1.0-beta-preview`) before running
-the suite on Node 22 and 24.
+synthesized data — no network and no submodules. CI (GitHub Actions) runs
+`npm ci`, lint, the format check, and the suite on Node 22 and 24.

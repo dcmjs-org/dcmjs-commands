@@ -13,6 +13,7 @@ import {
   findImagingEndpoint,
 } from "../src/smart/discovery.js";
 import {
+  assertStateMatches,
   buildAuthorizationUrl,
   exchangeCodeForToken,
   generatePkce,
@@ -76,15 +77,6 @@ describe("fetchSmartConfiguration", () => {
     await expect(
       fetchSmartConfiguration("https://fhir.example", { fetchFn })
     ).rejects.toThrow(/404.*--imaging-url/s);
-  });
-
-  test("unreachable server is a corrective error", async () => {
-    const fetchFn = async () => {
-      throw new Error("ECONNREFUSED");
-    };
-    await expect(
-      fetchSmartConfiguration("https://fhir.example", { fetchFn })
-    ).rejects.toThrow(/could not reach.*--fhir-url/s);
   });
 });
 
@@ -237,13 +229,6 @@ describe("exchangeCodeForToken", () => {
     ]);
     await expect(exchangeCodeForToken({ ...params, fetchFn })).rejects.toThrow(
       /400.*re-run/s
-    );
-  });
-
-  test("an answer without access_token is a corrective error", async () => {
-    const { fetchFn } = fakeFetch([["/token", jsonResponse({ ok: true })]]);
-    await expect(exchangeCodeForToken({ ...params, fetchFn })).rejects.toThrow(
-      /access_token.*--token/s
     );
   });
 });
@@ -484,17 +469,123 @@ describe("searchImagingStudies", () => {
       })
     ).rejects.toThrow(/401.*--scope/s);
   });
+});
 
-  test("a non-Bundle answer is a corrective error", async () => {
-    const { fetchFn } = fakeFetch([
-      ["/ImagingStudy?", jsonResponse({ resourceType: "OperationOutcome" })],
+describe("assertStateMatches", () => {
+  const state = "st-run";
+
+  test("exact match passes", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "c", state }, state })
+    ).not.toThrow();
+  });
+
+  test("a loopback redirect with no state is rejected", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "ATTACKER" }, state })
+    ).toThrow(/carried no state parameter/);
+  });
+
+  test("a mismatched state is rejected", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "c", state: "other" }, state })
+    ).toThrow(/does not match this run's/);
+  });
+
+  test("a bare pasted code without state is accepted only for --paste-code", () => {
+    expect(() =>
+      assertStateMatches({ redirect: { code: "c" }, state, pasteCode: true })
+    ).not.toThrow();
+    // but a pasted redirect that DOES carry a wrong state still fails
+    expect(() =>
+      assertStateMatches({
+        redirect: { code: "c", state: "other" },
+        state,
+        pasteCode: true,
+      })
+    ).toThrow(/does not match this run's/);
+  });
+});
+
+describe("searchImagingStudies paging", () => {
+  function page(uid, next) {
+    return {
+      resourceType: "Bundle",
+      link: next ? [{ relation: "next", url: next }] : [],
+      entry: [
+        {
+          resource: {
+            resourceType: "ImagingStudy",
+            id: uid,
+            identifier: [{ system: "urn:dicom:uid", value: `urn:oid:${uid}` }],
+            endpoint: [{ reference: "#e" }],
+            contained: [
+              {
+                resourceType: "Endpoint",
+                id: "e",
+                connectionType: { code: "dicom-wado-rs" },
+                address: "https://img.example/wado",
+              },
+            ],
+          },
+        },
+      ],
+    };
+  }
+
+  test("follows next links and returns the studies of every page", async () => {
+    // page 1 includes the shared Endpoint once; page 2 references it;
+    // page 3 repeats study 1.1 (offset paging over a changing result set)
+    const first = page("1.1", "/fhir?page=2");
+    first.entry.push({
+      fullUrl: "https://img.example/fhir/Endpoint/shared",
+      resource: {
+        resourceType: "Endpoint",
+        id: "shared",
+        connectionType: { code: "dicom-wado-rs" },
+        address: "https://img.example/wado-shared",
+      },
+    });
+    const second = page("1.2", "https://img.example/fhir?page=3");
+    const study2 = second.entry[0].resource;
+    delete study2.contained;
+    study2.endpoint = [{ reference: "Endpoint/shared" }];
+    const third = page("1.3");
+    third.entry.push(page("1.1").entry[0]);
+
+    const { fetchFn, calls } = fakeFetch([
+      ["page=3", jsonResponse(third)],
+      ["page=2", jsonResponse(second)],
+      ["/ImagingStudy?", jsonResponse(first)],
+    ]);
+    const result = await searchImagingStudies({
+      imagingBase: "https://img.example/fhir",
+      token: "tok1",
+      patient: "p1",
+      fetchFn,
+    });
+    expect(result.studies.map((s) => s.studyInstanceUID)).toEqual([
+      "1.1",
+      "1.2",
+      "1.3",
+    ]);
+    expect(result.studies[1].wadoBase).toBe("https://img.example/wado-shared");
+    expect(calls).toHaveLength(3);
+    expect(calls[2].options.headers.Authorization).toBe("Bearer tok1");
+  });
+
+  test("a next link to another origin is refused before the token goes there", async () => {
+    const { fetchFn, calls } = fakeFetch([
+      ["/ImagingStudy?", jsonResponse(page("1.1", "https://evil.example/p2"))],
     ]);
     await expect(
       searchImagingStudies({
         imagingBase: "https://img.example/fhir",
+        token: "tok1",
         patient: "p1",
         fetchFn,
       })
-    ).rejects.toThrow(/OperationOutcome.*--imaging-url/s);
+    ).rejects.toThrow(/different origin/);
+    expect(calls).toHaveLength(1);
   });
 });

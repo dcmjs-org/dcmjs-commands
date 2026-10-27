@@ -14,6 +14,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import dcmjs from "../dcmjsBundle.js";
 
 const { patientFromDataset, imagingStudyFromDatasets } = dcmjs.fhir;
@@ -24,7 +25,20 @@ const { patientFromDataset, imagingStudyFromDatasets } = dcmjs.fhir;
 // placeholder scheme? per-environment config? — is an open team question.
 const DEFAULT_WADO_ROOT = "http://localhost:5000/dicomweb";
 
-const ENDPOINT_ID = "dicomweb";
+/**
+ * Deterministic FHIR id for a WADO-RS Endpoint: "dicomweb-" + the first
+ * 12 hex chars of sha256(address). Two studies served from different
+ * bases must not share one Endpoint resource — a fixed id made the
+ * second study overwrite the first's Endpoint file, leaving the Bundle
+ * pointing every ImagingStudy at the last base written. Same address →
+ * same id, so re-publishing stays naturally idempotent.
+ */
+export function endpointIdForAddress(address) {
+  const hash = createHash("sha256")
+    .update(String(address).replace(/\/+$/, ""))
+    .digest("hex");
+  return `dicomweb-${hash.slice(0, 12)}`;
+}
 
 /** Sanitize a string to FHIR id chars (A-Za-z0-9-.), max 64. */
 function toFhirId(value, fallback) {
@@ -33,6 +47,27 @@ function toFhirId(value, fallback) {
     .replace(/^[-.]+|[-.]+$/g, "")
     .substring(0, 64);
   return cleaned || fallback;
+}
+
+const shortHash = (text) =>
+  createHash("sha256").update(String(text)).digest("hex").slice(0, 12);
+
+/**
+ * FHIR Patient id for a patient identifier. A value that is already a
+ * valid FHIR id is used as is. A value that sanitizing changes gets a hash
+ * suffix of the original, so "A/1" and "A 1" stay distinct patients. A
+ * missing value gets "unidentified-patient-<hash of the study UID>", so
+ * two studies without a PatientID never share (and overwrite) one Patient.
+ */
+export function patientIdFor(value, studyInstanceUID) {
+  if (value === undefined || value === null || value === "") {
+    return `unidentified-patient-${shortHash(studyInstanceUID)}`;
+  }
+  const cleaned = toFhirId(value, "patient");
+  if (cleaned === String(value)) {
+    return cleaned;
+  }
+  return `${cleaned.substring(0, 51)}-${shortHash(value)}`;
 }
 
 function readResource(filePath, expectedType) {
@@ -154,9 +189,9 @@ export function buildFhirLayer({
     };
   }
   if (!patient.id) {
-    patient.id = toFhirId(
+    patient.id = patientIdFor(
       patient.identifier?.[0]?.value ?? representative.PatientID,
-      "unidentified-patient"
+      representative.StudyInstanceUID
     );
   }
 
@@ -186,14 +221,15 @@ export function buildFhirLayer({
     representative.StudyInstanceUID,
     "imaging-study-1"
   );
-  imagingStudy.endpoint = [{ reference: `Endpoint/${ENDPOINT_ID}` }];
+  const endpointId = endpointIdForAddress(wadoRoot);
+  imagingStudy.endpoint = [{ reference: `Endpoint/${endpointId}` }];
   if (encounter) {
     imagingStudy.encounter = { reference: `Encounter/${encounter.id}` };
   }
 
   const endpoint = {
     resourceType: "Endpoint",
-    id: ENDPOINT_ID,
+    id: endpointId,
     status: "active",
     connectionType: {
       system: "http://terminology.hl7.org/CodeSystem/endpoint-connection-type",

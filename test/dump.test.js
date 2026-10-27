@@ -1,11 +1,9 @@
 // test/dump.test.js
 
 import path from "path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,7 +29,9 @@ async function dump(values) {
   return { code, text: out.lines.join("\n"), err: err.lines.join("\n") };
 }
 
-test("dump default prints tag/VR lines (legacy-compatible)", async () => {
+// The (GGGG,EEEE) format REPLACED the pre-1.0 "key name value" output —
+// it is a breaking output change, not a compatible one.
+test("dump default prints (GGGG,EEEE) VR Keyword tag lines", async () => {
   const { code, text } = await dump({});
   expect(code).toBe(0);
   expect(text).toMatch(/\(0010,0010\)\s+PN\s+PatientName/);

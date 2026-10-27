@@ -25,9 +25,13 @@ import { runDicomdir } from "../commands/dicomdir.js";
 import { runDicomweb } from "../commands/dicomweb.js";
 import { runCaptured, commandError } from "./capture.js";
 
+// Same forms as the CLI filter; runFilter's normalizeTag validates them.
 const TAG = z
   .string()
-  .regex(/^[0-9A-Fa-f]{8}$/, "an 8-hex-digit DICOM tag like 00100010");
+  .regex(
+    /^(?:[0-9A-Fa-f]{8}|[A-Za-z][A-Za-z0-9]*)$/,
+    "an 8-hex-digit DICOM tag like 00100010, or a keyword like PatientName"
+  );
 
 function ok(extra, { stderrLines } = { stderrLines: [] }) {
   return { ok: true, warnings: stderrLines.filter(Boolean), ...extra };

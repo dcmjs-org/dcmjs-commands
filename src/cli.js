@@ -199,6 +199,7 @@ const COMMANDS = {
       format: { type: "string" },
       fhir: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
+      "allow-cross-origin-endpoints": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   },

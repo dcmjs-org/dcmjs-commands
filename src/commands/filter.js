@@ -11,17 +11,14 @@
 // With no filters this is a streaming structural copy — output is valid,
 // semantically equal Part 10 (byte-identical output is a non-goal; see
 // StreamingPart10Writer's encoding notes).
-//
-// Custom filters (--module) follow the established chain shape: an object
-// (or default-exported array of objects) whose methods are
-// `method(next, ...args)` over the event-stream vocabulary. Note that `this`
-// inside filter methods is the shared listener, per the EventStreamListener
-// contract — keep private state in module scope if you chain several filters.
 
 import fs from "node:fs";
-import { once } from "node:events";
 import { pathToFileURL } from "node:url";
+import dcmjsBundle from "../dcmjsBundle.js";
+import { createFileSink } from "../io.js";
 import { makeFhirPatientFilter } from "../filters/fhirPatient.js";
+
+const { nameMap } = dcmjsBundle.data.DicomMetaDictionary;
 
 export const filterUsage = `usage: dcmjs filter <in.dcm> -o <out.dcm> [options]
 
@@ -29,9 +26,10 @@ Stream a DICOM file through an event-stream filter chain to a new file.
 
     -o, --output <file>   output Part 10 file (required)
     --set TAG=VALUE       replace the value of every element with this tag
-                          (repeatable; TAG is 8 hex digits, e.g. 00100010)
+                          (repeatable; TAG is 8 hex digits or a DICOM
+                          keyword, e.g. 00100010 or PatientName)
     --drop TAG            remove every element or sequence with this tag
-                          (repeatable)
+                          (repeatable; same TAG forms as --set)
     --fhir-patient <file> apply a FHIR Patient resource to the patient module
                           (insert-or-replace of PatientName/ID/BirthDate/Sex;
                           fields absent from the resource are written empty)
@@ -53,11 +51,19 @@ export function loadFhirPatientAttrs(dcmjs, filePath) {
   return dcmjs.fhir.patientToDataset(resource);
 }
 
-/** Accept 00100010, 0010,0010 or (0010,0010); return canonical 8-hex. */
+/**
+ * Accept 00100010, 0010,0010, (0010,0010), or a DICOM keyword such as
+ * PatientName (via the dictionary's nameMap); return canonical 8-hex.
+ */
 function normalizeTag(text) {
+  if (/^[A-Za-z]/.test(text) && nameMap[text]) {
+    return nameMap[text].tag.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+  }
   const hex = text.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
   if (hex.length !== 8) {
-    throw new Error(`invalid tag "${text}" — expected 8 hex digits`);
+    throw new Error(
+      `invalid tag "${text}" — expected 8 hex digits or a DICOM keyword`
+    );
   }
   return hex;
 }
@@ -163,6 +169,14 @@ function makeDropFilter(tags) {
   };
 }
 
+/**
+ * Load custom filters from --module files. Each module's default export
+ * is a filter object (or array of them) whose methods are
+ * `method(next, ...args)` over the event-stream vocabulary. Contract for
+ * authors: `this` inside a filter method is the SHARED listener, per
+ * EventStreamListener — keep private state in module scope when several
+ * filters chain, or they will trample each other's fields.
+ */
 async function loadModuleFilters(files) {
   const filters = [];
   for (const file of files) {
@@ -216,41 +230,31 @@ export async function runFilter({
     return 1;
   }
 
-  const out = fs.createWriteStream(outFile);
-  let pending = false;
+  let sink;
+  try {
+    sink = createFileSink(outFile, { inputPath: inFile });
+  } catch (e) {
+    stderr(`dcmjs filter: ${e.message}`);
+    return 1;
+  }
   const writer = new StreamingPart10Writer(
-    {
-      onChunk: (chunk) => {
-        if (!out.write(chunk)) {
-          pending = true;
-        }
-      },
-    },
+    { onChunk: (chunk) => sink.write(chunk) },
     ...filters
   );
-  writer.setDrain(async () => {
-    if (pending) {
-      pending = false;
-      await once(out, "drain");
-    }
-  });
+  writer.setDrain(() => sink.drain());
 
   try {
     const input = fs.createReadStream(inFile, {
       highWaterMark: 8 * 1024 * 1024,
     });
     await fromPart10Stream(input, writer);
-    out.end();
-    await once(out, "finish");
+    if (!writer.done) {
+      throw new Error("input ended before the dataset completed");
+    }
+    await sink.finish();
   } catch (e) {
-    out.destroy();
-    fs.rmSync(outFile, { force: true });
+    sink.abort();
     stderr(`dcmjs filter: ${e.message}`);
-    return 1;
-  }
-
-  if (!writer.done) {
-    stderr("dcmjs filter: input ended before the dataset completed");
     return 1;
   }
   stdout(

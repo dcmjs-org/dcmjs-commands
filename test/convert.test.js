@@ -3,11 +3,9 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,6 +105,12 @@ test("pdf → dcm wraps into an Encapsulated PDF instance", async () => {
   expect(dataset.SOPClassUID).toBe("1.2.840.10008.5.1.4.1.1.104.1");
   expect(dataset.Modality).toBe("DOC");
   expect(dataset.MIMETypeOfEncapsulatedDocument).toBe("application/pdf");
+  // The demographics flags must land on the instance (they ride the
+  // builder's `overrides` — a silent drop here passed before this assert)
+  expect([].concat(dataset.PatientName)[0]).toEqual({
+    Alphabetic: "Doe^Jane",
+  });
+  expect(dataset.DocumentTitle).toBe("Discharge Summary");
 });
 
 test("dcm → pdf extracts the original bytes (PACS round trip)", async () => {

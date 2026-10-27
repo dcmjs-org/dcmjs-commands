@@ -1,4 +1,4 @@
-// src/commands/convert.mjs
+// src/commands/convert.js
 //
 // dcmjs convert <input> --to <format> [options]
 //
@@ -21,6 +21,7 @@ import {
 import { decodeImage } from "../imaging/decodeImage.js";
 import { extractTagKeyedJson } from "../utils/extractTagKeyedJson.js";
 import { loadFhirPatientAttrs } from "./filter.js";
+import { PATIENT_MODULE } from "../filters/fhirPatient.js";
 import {
   convertMp4ToDicom,
   convertDicomToMp4,
@@ -82,16 +83,9 @@ function pdfOptionsFromValues(values) {
   return options;
 }
 
-const PATIENT_MODULE_TAGS = [
-  { tag: "00100010", vr: "PN", keyword: "PatientName" },
-  { tag: "00100020", vr: "LO", keyword: "PatientID" },
-  { tag: "00100030", vr: "DA", keyword: "PatientBirthDate" },
-  { tag: "00100040", vr: "CS", keyword: "PatientSex" },
-];
-
 /** Insert-or-replace the patient module on a parsed DicomDict. */
 function applyFhirAttrsToDict(dicomDict, fhirAttrs) {
-  for (const { tag, vr, keyword } of PATIENT_MODULE_TAGS) {
+  for (const { tag, vr, keyword } of PATIENT_MODULE) {
     const value = fhirAttrs[keyword];
     dicomDict.upsertTag(tag, vr, value ? [value] : []);
   }
@@ -303,12 +297,35 @@ async function convertImage({
     );
   }
 
+  // Sidecar tags are DICOM JSON; the builder wants naturalized overrides.
+  // A sidecar that names a source instance (SOPClassUID + SOPInstanceUID)
+  // makes this a derivation: the source UID feeds SourceImageSequence and
+  // is never the output UID — the builder mints a fresh one.
+  const sidecarAttrs = Object.keys(metadata.tags).length
+    ? dcmjs.data.DicomMetaDictionary.naturalizeDataset(metadata.tags)
+    : {};
+  delete sidecarAttrs._vrMap;
+  const { SOPInstanceUID: sourceInstanceUID, ...sidecarOverrides } =
+    sidecarAttrs;
+  const derivedFrom =
+    sourceInstanceUID && sidecarOverrides.SOPClassUID
+      ? [
+          {
+            SOPClassUID: sidecarOverrides.SOPClassUID,
+            SOPInstanceUID: sourceInstanceUID,
+          },
+        ]
+      : undefined;
+
   const events = dcmjs.eventStream.DicomEventStream.fromImage(decoded, {
-    metadata: Object.keys(metadata.tags).length ? metadata.tags : undefined,
-    ...pdfOptionsFromValues(values),
+    ...(derivedFrom ? { derivedFrom } : {}),
     // FHIR Patient wins over metadata and the individual patient flags;
     // its empties are deliberate (deterministic overwrite of the module)
-    ...(fhirAttrs || {}),
+    overrides: {
+      ...sidecarOverrides,
+      ...pdfOptionsFromValues(values),
+      ...(fhirAttrs || {}),
+    },
     ...(values["restore-values"] ? { lossy: { method: "ISO_10918_1" } } : {}),
   });
 
@@ -328,8 +345,7 @@ async function convertImage({
 async function convertPdf({ dcmjs, arrayBuffer, to, values, fhirAttrs }) {
   const fhirVersion = values["fhir-version"] || "R4B";
   const dataset = dcmjs.encapsulated.encapsulatePdf(arrayBuffer, {
-    ...pdfOptionsFromValues(values),
-    ...(fhirAttrs || {}),
+    overrides: { ...pdfOptionsFromValues(values), ...(fhirAttrs || {}) },
   });
 
   if (to === "dcm") {
@@ -403,6 +419,16 @@ export async function runConvert({
     if (kind === "dicom" && to === "mp4") {
       if (!values.output) {
         throw new Error("dcm → mp4 produces binary; use -o <file>");
+      }
+      if (fhirAttrs) {
+        // The extracted MP4 carries no DICOM attributes — silently
+        // accepting the flag would let a caller believe the demographics
+        // were applied somewhere.
+        throw new Error(
+          "--fhir-patient does not apply to dcm → mp4 (the extracted MP4 " +
+            "carries no DICOM attributes); apply it to the input with " +
+            "dcmjs filter --fhir-patient instead"
+        );
       }
       return await convertDicomToMp4({
         dcmjs,

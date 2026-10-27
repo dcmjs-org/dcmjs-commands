@@ -29,6 +29,36 @@ export function generateState() {
 }
 
 /**
+ * CSRF check for the authorization redirect. A loopback redirect MUST
+ * carry this run's exact `state` — any other page can hit the local
+ * listener during the wait, so a missing state is as untrustworthy as a
+ * wrong one. Only a bare code pasted by the user (--paste-code) may omit
+ * it: the person at the terminal is the channel there, not the listener.
+ * @throws {Error} when the redirect cannot be tied to this run
+ */
+export function assertStateMatches({ redirect, state, pasteCode = false }) {
+  if (redirect.state === state) {
+    return;
+  }
+  if (pasteCode && redirect.state === undefined) {
+    return;
+  }
+  if (redirect.state) {
+    throw new Error(
+      `the redirect's state parameter does not match this run's — the ` +
+        `response belongs to a different (or forged) authorization ` +
+        `attempt and its code cannot be trusted; re-run and use the ` +
+        `freshly printed URL`
+    );
+  }
+  throw new Error(
+    `the redirect carried no state parameter — the response cannot be ` +
+      `tied to this run's authorization request and its code cannot be ` +
+      `trusted; re-run and use the freshly printed URL`
+  );
+}
+
+/**
  * Authorization-code request URL per SMART App Launch: the FHIR base goes
  * in `aud` so the authorization server knows which resource server the
  * token is for (the imaging server accepts the same token).

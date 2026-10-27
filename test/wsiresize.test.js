@@ -5,7 +5,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { createRequire } from "node:module";
+import dcmjs from "../src/dcmjsBundle.js";
 import { runWsiResize } from "../src/commands/wsiresize.js";
 import {
   readPart10Frames,
@@ -16,8 +16,6 @@ import { downsampleBox } from "../src/pixel/resample.js";
 import { planLevels } from "../src/wsi/pyramid.js";
 import { writeSyntheticWsi } from "./helpers/syntheticWsi.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
 dcmjs.log.setLevel("silent");
 
 let tmpDir;

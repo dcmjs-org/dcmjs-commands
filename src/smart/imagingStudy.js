@@ -133,11 +133,19 @@ export function resolveEndpoint(bundle, study) {
   return chosen;
 }
 
+/** Upper bound on followed `next` links, so a looping server cannot hang a run. */
+const MAX_SEARCH_PAGES = 100;
+
 /**
  * Search the imaging endpoint for the patient's studies and resolve each
- * one's WADO-RS base.
+ * one's WADO-RS base. Follows the Bundle `next` links, so a paged result
+ * returns every study. A `next` link to a different origin is refused,
+ * because each page request carries the access token. Endpoints resolve
+ * against the entries of all pages (a server may include a shared
+ * Endpoint only once), and a study repeated across pages is kept once.
  * @returns {Promise<{url, bundle, studies: Array<{study, wadoBase,
- *   studyInstanceUID}>}>}
+ *   studyInstanceUID}>}>} `url` is the first page; `bundle` holds the
+ *   entries of every page
  */
 export async function searchImagingStudies({
   imagingBase,
@@ -147,7 +155,6 @@ export async function searchImagingStudies({
   studyUid,
   fetchFn,
 }) {
-  const doFetch = fetchFn ?? globalThis.fetch;
   const url =
     stripTrailingSlash(imagingBase) +
     buildImagingStudyQuery({ patient, lastUpdated, studyUid });
@@ -155,7 +162,59 @@ export async function searchImagingStudies({
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
+  const doFetch = fetchFn ?? globalThis.fetch;
+  const origin = new URL(url).origin;
 
+  let firstBundle;
+  const entries = [];
+  let pageUrl = url;
+  for (let page = 1; pageUrl; page++) {
+    if (page > MAX_SEARCH_PAGES) {
+      throw new Error(
+        `ImagingStudy search ${url} returned more than ` +
+          `${MAX_SEARCH_PAGES} pages — narrow it with --last-updated or ` +
+          `--study-uid`
+      );
+    }
+    const bundle = await fetchSearchPage(
+      doFetch,
+      pageUrl,
+      headers,
+      imagingBase
+    );
+    firstBundle ??= bundle;
+    entries.push(...(bundle.entry ?? []));
+    pageUrl = nextPageUrl(bundle, pageUrl, origin);
+  }
+  const bundle = { ...firstBundle, entry: entries };
+  const seen = new Set();
+  const studies = studiesFromBundle(bundle).filter(({ studyInstanceUID }) => {
+    if (seen.has(studyInstanceUID)) {
+      return false;
+    }
+    seen.add(studyInstanceUID);
+    return true;
+  });
+  return { url, bundle, studies };
+}
+
+/** The absolute `next` link of a search Bundle, or null on the last page. */
+function nextPageUrl(bundle, pageUrl, origin) {
+  const next = (bundle.link ?? []).find((l) => l?.relation === "next")?.url;
+  if (!next) {
+    return null;
+  }
+  const absolute = new URL(next, pageUrl);
+  if (absolute.origin !== origin) {
+    throw new Error(
+      `ImagingStudy search page link ${absolute.href} is on a different ` +
+        `origin than ${origin} — refusing to send the access token there`
+    );
+  }
+  return absolute.href;
+}
+
+async function fetchSearchPage(doFetch, url, headers, imagingBase) {
   const response = await doFetch(url, { headers });
   if (response.status === 401 || response.status === 403) {
     throw new Error(
@@ -182,7 +241,10 @@ export async function searchImagingStudies({
         `(not the WADO-RS root)`
     );
   }
+  return bundle;
+}
 
+function studiesFromBundle(bundle) {
   const studies = [];
   for (const entry of bundle.entry ?? []) {
     const study = entry?.resource;
@@ -206,5 +268,5 @@ export async function searchImagingStudies({
       wadoBase: stripTrailingSlash(endpoint.address),
     });
   }
-  return { url, bundle, studies };
+  return studies;
 }

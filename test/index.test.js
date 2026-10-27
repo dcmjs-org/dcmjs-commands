@@ -3,11 +3,9 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,11 +48,10 @@ test("readDicom parses a small (<4KB) file — pooled-Buffer regression", () => 
   );
 });
 
-test("dumpDicom writes tag lines through an injected stdout", () => {
+test("dumpDicom writes (GGGG,EEEE) tag lines through an injected stdout", () => {
   const lines = [];
   const dicomDict = readDicom(FIXTURE);
   dumpDicom(dicomDict, { stdout: (...args) => lines.push(args.join(" ")) });
   const text = lines.join("\n");
-  expect(text).toContain("00080060");
-  expect(text).toContain("Modality");
+  expect(text).toMatch(/\(0008,0060\)\s+CS\s+Modality/);
 });

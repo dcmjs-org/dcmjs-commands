@@ -3,11 +3,9 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +27,23 @@ beforeAll(() => {
 });
 afterAll(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("anonymize --dry-run does not list unchanged binary elements", async () => {
+  const out = capture();
+  const code = await runAnonymize({
+    dcmjs,
+    positionals: [FIXTURE],
+    values: { "dry-run": true },
+    stdout: out.write,
+    stderr: () => {},
+  });
+  expect(code).toBe(0);
+  const { changes } = JSON.parse(out.lines.join("\n"));
+  const tags = changes.map((c) => c.tag);
+  for (const tag of ["7FE00010", "20011003", "2001100A"]) {
+    expect(tags).not.toContain(tag);
+  }
 });
 
 test("anonymize writes a scrubbed copy", async () => {

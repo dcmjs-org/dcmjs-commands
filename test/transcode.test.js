@@ -6,7 +6,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
-import { createRequire } from "node:module";
+import dcmjs from "../src/dcmjsBundle.js";
 import { runTranscode } from "../src/commands/transcode.js";
 import {
   readPart10Frames,
@@ -14,8 +14,6 @@ import {
 } from "../src/pixel/frameReader.js";
 import { writeSyntheticWsi } from "./helpers/syntheticWsi.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
 dcmjs.log.setLevel("silent");
 
 let tmpDir;

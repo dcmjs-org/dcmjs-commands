@@ -9,11 +9,9 @@
 import path from "path";
 import fs from "fs";
 import os from "os";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,6 +93,21 @@ test("--set replaces a value in place", async () => {
   expect(new Uint8Array(dst.dict["7FE00010"].Value[0]).length).toBe(524288);
 });
 
+test("--set fills an element that is present but empty", async () => {
+  const src = readDict(FIXTURE);
+  src.upsertTag("00100020", "LO", []);
+  const emptyFile = path.join(tmpDir, "empty-patient-id.dcm");
+  fs.writeFileSync(emptyFile, Buffer.from(src.write()));
+
+  const outFile = path.join(tmpDir, "filled-patient-id.dcm");
+  const { code } = await filter([emptyFile], {
+    output: outFile,
+    set: ["PatientID=NEW"],
+  });
+  expect(code).toBe(0);
+  expect(readDict(outFile).dict["00100020"].Value).toEqual(["NEW"]);
+});
+
 test("--drop removes leaf elements and whole sequences", async () => {
   const outFile = path.join(tmpDir, "drop.dcm");
   const { code } = await filter([FIXTURE], {
@@ -151,4 +164,58 @@ test("--help prints usage and exits 0", async () => {
   const { code, text } = await filter([], { help: true });
   expect(code).toBe(0);
   expect(text).toContain("usage");
+});
+
+test("refuses to overwrite the input file in place", async () => {
+  const inPlace = path.join(tmpDir, "inplace.dcm");
+  fs.copyFileSync(FIXTURE, inPlace);
+  const before = fs.readFileSync(inPlace);
+  const { code, err } = await filter([inPlace], {
+    output: path.join(tmpDir, ".", "inplace.dcm"),
+    set: ["00100010=GONE"],
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/refusing to overwrite the input file in place/);
+  expect(fs.readFileSync(inPlace).equals(before)).toBe(true);
+});
+
+test("truncated input leaves no partial output file", async () => {
+  const truncated = path.join(tmpDir, "truncated.dcm");
+  const bytes = fs.readFileSync(FIXTURE);
+  fs.writeFileSync(truncated, bytes.subarray(0, Math.floor(bytes.length / 2)));
+  const outFile = path.join(tmpDir, "from-truncated.dcm");
+  const { code, err } = await filter([truncated], { output: outFile });
+  expect(code).toBe(1);
+  expect(err).toMatch(/dcmjs filter:/);
+  expect(fs.existsSync(outFile)).toBe(false);
+});
+
+test("an unwritable output path fails cleanly instead of crashing", async () => {
+  const outFile = path.join(tmpDir, "no-such-dir", "out.dcm");
+  const { code, err } = await filter([FIXTURE], { output: outFile });
+  expect(code).toBe(1);
+  expect(err).toMatch(/ENOENT/);
+  expect(fs.existsSync(outFile)).toBe(false);
+});
+
+test("--set and --drop accept DICOM keywords", async () => {
+  const outFile = path.join(tmpDir, "keyword.dcm");
+  const { code } = await filter([FIXTURE], {
+    output: outFile,
+    set: ["PatientName=KEYWORD^SET"],
+    drop: ["InstitutionName"],
+  });
+  expect(code).toBe(0);
+  const dict = readDict(outFile).dict;
+  expect(dict["00100010"].Value[0].Alphabetic).toBe("KEYWORD^SET");
+  expect(dict["00080080"]).toBeUndefined();
+});
+
+test("an unknown keyword is a corrective error", async () => {
+  const { code, err } = await filter([FIXTURE], {
+    output: path.join(tmpDir, "never.dcm"),
+    drop: ["NotARealKeyword"],
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/expected 8 hex digits or a DICOM keyword/);
 });

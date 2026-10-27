@@ -41,8 +41,8 @@ fork true on dcmjs 1.0-beta (the validate feature-detect, two hygiene fixes,
 the dependency pointer, the CI wiring), then the `patient-access` command
 implementing the Argonaut SMART Imaging Access IG, with a real end-to-end
 transcript against the Argonaut reference server in EXAMPLES.md. The dcmjs
-dependency is declared as a `file:` sibling plus a CI step that checks out
-and builds the dcmjs integration branch — deliberately, see section 3.
+dependency went through three stages, from a `file:` sibling to the
+published beta — see section 3.
 
 This landing was briefly staged as two overlapping PRs (the dcmjs
 assembly-PR pattern); they were combined into this one so the review is a
@@ -58,16 +58,16 @@ test evidence with counts, honest caveats.
 The fork needs dcmjs 1.0, which is not on npm yet; the maintainers want
 evidence before publishing it. So the dependency is staged:
 
-1. **Now (this PR):** `"dcmjs": "file:../dcmjs-integration"` with CI
+1. **Done:** `"dcmjs": "file:../dcmjs-integration"` with CI
    building `awatson1978/dcmjs@integration/1.0-beta-preview` as a sibling.
    The green CLI suite _is_ the downstream evidence that the ten dcmjs
    assembly PRs compose correctly — this repo is dcmjs 1.0's first consumer.
-2. **Maintainers merge the dcmjs assemblies and flip the publish switch:**
-   `@dcmjs-org/dcmjs@1.0.0-beta.N` appears on npm under the `beta` tag
-   (publishing machinery already verified by dry run on the dcmjs side).
-3. **A one-commit follow-up here** swaps the dependency to
-   `@dcmjs-org/dcmjs@^1.0.0-beta` and deletes the CI sibling checkout. From
-   then on, this repo installs like any other package.
+2. **Done:** the maintainers published `@dcmjs-org/dcmjs@1.0.0-beta.4` (and
+   the `@dcmjs-org/*` packages) to npm.
+3. **Done, in this PR:** the dependency is
+   `npm:@dcmjs-org/dcmjs@1.0.0-beta.4`, with `@dcmjs-org/media` and
+   `@dcmjs-org/fhir` declared directly, and CI no longer builds a sibling.
+   This repo installs like any other package.
 
 ## 4. Test evidence standards
 
@@ -94,8 +94,6 @@ green locally and the PR checks re-run once the lock clears.
 - **Bench corpus assumption.** `bench/baseline.js` defaults to fixture paths
   from the dcmjs 0.x checkout layout; it runs fine with explicit file
   arguments. Cosmetic.
-- **Version self-report.** The integration bundle reports dcmjs 0.49.2 until
-  the real beta is stamped by the dcmjs publish pipeline. Expected.
 
 ## 6. Deliberately not in this PR
 

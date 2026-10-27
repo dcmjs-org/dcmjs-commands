@@ -21,9 +21,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/awatson1978/dcmjs-commands"
+    "url": "https://github.com/dcmjs-org/dcmjs-commands"
   },
-  "homepage": "https://github.com/awatson1978/dcmjs-commands#readme",
+  "homepage": "https://github.com/dcmjs-org/dcmjs-commands#readme",
   "license": "MIT",
   "main": "src/index.js",
   "exports": {
@@ -40,7 +40,7 @@
     "dcmjs-mcp": "bin/dcmjs-mcp.js"
   },
   "scripts": {
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "lint": "eslint \"{src,bin,test}/**/*.{js,mjs}\"",
     "lint:fix": "eslint --fix \"{src,bin,test}/**/*.{js,mjs}\"",
     "format": "prettier --write \"{src,bin,test}/**/*.js\"",
@@ -56,9 +56,11 @@
   },
   "dependencies": {
     "@cornerstonejs/dicom-codec": "file:../codecs-jxl/packages/dicom-codec",
+    "@dcmjs-org/fhir": "1.0.0-beta.5",
+    "@dcmjs-org/media": "1.0.0-beta.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.1.0",
-    "dcmjs": "file:../dcmjs-integration",
+    "dcmjs": "npm:@dcmjs-org/dcmjs@1.0.0-beta.5",
     "dicomweb-client": "^0.11.2",
     "jpeg-js": "^0.4.4",
     "jsdom": "^29.1.1",

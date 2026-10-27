@@ -7,14 +7,12 @@
 
 import path from "path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "../../src/mcp/server.js";
 import { TOOLS } from "../../src/mcp/registry.js";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -8,11 +8,9 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const dcmjs = require("dcmjs");
+import dcmjs from "../src/dcmjsBundle.js";
 dcmjs.log.setLevel("silent");
 dcmjs.log.getLogger("validation.dcmjs").setLevel("silent");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -265,4 +263,27 @@ describe("video instance JSON output", () => {
       fs.statSync(mp4Path).size
     );
   });
+});
+
+test("--fhir-patient on dcm -> mp4 is an explicit error, not a silent no-op", async () => {
+  const patientFile = path.join(dir, "fp.json");
+  fs.writeFileSync(
+    patientFile,
+    JSON.stringify({ resourceType: "Patient", name: [{ family: "X" }] })
+  );
+  const code = await runConvert({
+    dcmjs,
+    positionals: [DICOM_FIXTURE],
+    values: {
+      to: "mp4",
+      output: path.join(dir, "never.mp4"),
+      "fhir-patient": patientFile,
+    },
+    ...io,
+  });
+  expect(code).toBe(1);
+  expect(err.join("\n")).toMatch(
+    /--fhir-patient does not apply to dcm → mp4.*filter --fhir-patient/s
+  );
+  expect(fs.existsSync(path.join(dir, "never.mp4"))).toBe(false);
 });

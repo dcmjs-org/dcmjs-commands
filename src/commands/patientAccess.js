@@ -19,6 +19,7 @@ import {
 import {
   DEFAULT_REDIRECT_PORT,
   REDIRECT_PATH,
+  assertStateMatches,
   buildAuthorizationUrl,
   exchangeCodeForToken,
   generatePkce,
@@ -60,12 +61,75 @@ study over WADO-RS with the same Bearer token.
                             Static-DICOMweb tree)
     --fhir                  also write the FHIR layer under <output>/fhir
     --dry-run               stop after listing studies and endpoints
+    --allow-cross-origin-endpoints
+                            permit retrieval from study Endpoints on a
+                            different origin than the discovered servers
+                            (the access token is sent there; off by default)
 `;
 
 const FORMATS = {
   dicomweb: () => DicomAccess.DICOMWEB_OPTIONS,
   part10: () => DicomAccess.PART10_OPTIONS,
 };
+
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Gate every study Endpoint address before the Bearer token goes near it:
+ * the URL must parse, must be https (loopback hostnames exempt, for local
+ * development servers), and must share an origin with the servers this
+ * run actually authorized against — unless --allow-cross-origin-endpoints
+ * explicitly widens the trust, in which case a warning names the host.
+ * A server-supplied http:// or third-party address would otherwise leak
+ * the patient's access token.
+ * @throws {Error} when the endpoint must not receive the token
+ */
+export function assertEndpointAllowed(
+  wadoBase,
+  { trustedOrigins, allowCrossOrigin = false, stderr }
+) {
+  const url = assertSecureAddress(wadoBase, "study Endpoint address");
+  if (!trustedOrigins.has(url.origin)) {
+    if (!allowCrossOrigin) {
+      throw new Error(
+        `study Endpoint address ${wadoBase} is on a different origin ` +
+          `than the servers this run authorized against ` +
+          `(${[...trustedOrigins].join(", ")}) — the access token would ` +
+          `go to a third party; pass --allow-cross-origin-endpoints to ` +
+          `permit it`
+      );
+    }
+    stderr(
+      `patient-access: warning: sending the access token to the ` +
+        `cross-origin endpoint ${url.origin} (--allow-cross-origin-endpoints)`
+    );
+  }
+}
+
+/**
+ * Require a parseable https address (loopback hostnames exempt) before the
+ * access token is sent to it.
+ * @returns {URL}
+ * @throws {Error} naming `label` when the address must not get the token
+ */
+export function assertSecureAddress(address, label) {
+  let url;
+  try {
+    url = new URL(address);
+  } catch {
+    throw new Error(
+      `${label} "${address}" is not a valid URL — ` +
+        `refusing to send the access token to it`
+    );
+  }
+  if (url.protocol !== "https:" && !LOOPBACK_HOSTNAMES.has(url.hostname)) {
+    throw new Error(
+      `${label} ${address} is not https — the access ` +
+        `token would travel in clear text; refusing to send it there`
+    );
+  }
+  return url;
+}
 
 /** Best-effort `open`/`xdg-open`; the printed URL is the real interface. */
 function defaultOpenBrowser(url) {
@@ -154,6 +218,9 @@ async function authorize({
         `authorization with --token <bearer>`
     );
   }
+  // The code, the PKCE verifier, and the token travel to these addresses.
+  assertSecureAddress(authorization_endpoint, "authorization_endpoint");
+  assertSecureAddress(token_endpoint, "token_endpoint");
   const { codeVerifier, codeChallenge } = generatePkce();
   const state = generateState();
   const redirectUri = `http://127.0.0.1:${port}${REDIRECT_PATH}`;
@@ -178,14 +245,11 @@ async function authorize({
     stdout(`patient-access: waiting for the redirect on ${redirectUri} ...`);
     redirect = await listen({ port });
   }
-  if (redirect.state && redirect.state !== state) {
-    throw new Error(
-      `the redirect's state parameter does not match this run's — the ` +
-        `response belongs to a different (or forged) authorization ` +
-        `attempt and its code cannot be trusted; re-run and use the ` +
-        `freshly printed URL`
-    );
-  }
+  assertStateMatches({
+    redirect,
+    state,
+    pasteCode: Boolean(values["paste-code"]),
+  });
 
   const token = await exchangeCodeForToken({
     tokenEndpoint: token_endpoint,
@@ -246,6 +310,11 @@ export async function runPatientAccess({
           `pass the imaging FHIR base explicitly with --imaging-url`
       );
       return 1;
+    }
+    if (!values["imaging-url"]) {
+      // The search sends the token to the discovered server, so the
+      // server-supplied address gets the same https gate as Endpoints.
+      assertSecureAddress(imagingBase, "discovered imaging server");
     }
 
     // 2. Authorization — skipped entirely with --token.
@@ -310,7 +379,24 @@ export async function runPatientAccess({
       return 0;
     }
 
-    // 4. Retrieve each study over WADO-RS with the same Bearer token.
+    // 4. Retrieve each study over WADO-RS with the same Bearer token —
+    //    but first gate every Endpoint address, before anything is
+    //    written or any token is sent.
+    const trustedOrigins = new Set();
+    for (const base of [imagingBase, fhirUrl]) {
+      try {
+        trustedOrigins.add(new URL(base).origin);
+      } catch {
+        // absent or non-URL base; the other one carries the trust
+      }
+    }
+    for (const { wadoBase } of studies) {
+      assertEndpointAllowed(wadoBase, {
+        trustedOrigins,
+        allowCrossOrigin: Boolean(values["allow-cross-origin-endpoints"]),
+        stderr,
+      });
+    }
     const destination = await createAccess(values.output, {
       scheme: "file",
       isDestination: true,

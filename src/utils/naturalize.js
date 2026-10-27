@@ -1,3 +1,12 @@
+// src/utils/naturalize.js
+//
+// Naturalize DICOMWEB-JSON-SHAPED input: the pre-pass defaults a missing
+// Value to [] (metadata responses legally omit it) before handing off to
+// DicomMetaDictionary. For dicts parsed from Part 10 files that pre-pass
+// is unnecessary — commands calling naturalizeDataset directly on a
+// DicomMessage.readFile result are correct and deliberately do not route
+// through here.
+
 import dcmjs from "../dcmjsBundle.js";
 
 export function naturalize(json) {

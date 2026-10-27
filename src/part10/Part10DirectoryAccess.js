@@ -4,9 +4,9 @@
 // source interface — so `dicomwebjs download` (and `dcmjs dicomweb`) can
 // build a Static-DICOMweb tree straight from .dcm files, no server needed.
 //
-// The scan does one full parse per file (pixel buffers are not retained;
-// frames are re-read on demand with a one-entry cache, so peak memory is
-// about one file). Files missing Study/Series/SOP UIDs are skipped with a
+// The scan does one full parse per file (pixel and bulkdata bytes are not
+// retained; both are re-read on demand with a one-entry cache, so peak
+// memory is about one file). Files missing Study/Series/SOP UIDs are skipped with a
 // warning, never silently dropped.
 
 import { DicomAccess } from "../access/DicomAccess.js";
@@ -46,6 +46,8 @@ export class Part10DirectoryAccess extends DicomAccess {
 
     const groups = new Map();
     const skipped = [];
+    // SOP UIDs are unique across the whole tree, not only within a series
+    const bySopUID = new Map();
     for (const filePath of files) {
       let entry = null;
       try {
@@ -74,7 +76,25 @@ export class Part10DirectoryAccess extends DicomAccess {
         instances = new Map();
         series.set(entry.seriesUID, instances);
       }
+      const kept = bySopUID.get(entry.sopUID);
+      if (kept) {
+        dicomIssueLog.warn(
+          "Skipping duplicate SOPInstanceUID",
+          filePath,
+          "same as",
+          kept.filePath
+        );
+        skipped.push({
+          file: filePath,
+          error: `duplicate SOPInstanceUID ${entry.sopUID} (kept ${kept.filePath})`,
+        });
+        continue;
+      }
+      // The bytes are read again on demand (readBulkdata), so the memoized
+      // scan holds metadata only.
+      entry.bulkdataMap = null;
       instances.set(entry.sopUID, entry);
+      bySopUID.set(entry.sopUID, entry);
     }
     log.info(
       "Scanned",
@@ -110,18 +130,36 @@ export class Part10DirectoryAccess extends DicomAccess {
   }
 
   /**
-   * Pixel data re-read with a one-entry cache: the store walk visits
-   * instances sequentially, so caching the last file covers the per-frame
-   * loop without holding more than one file's pixels.
+   * Re-read a file with a one-entry cache: the store walk visits instances
+   * sequentially, so caching the last file covers the per-frame and
+   * per-bulkdata loops without holding more than one file in memory.
    */
-  readPixelValue(filePath) {
-    if (this._pixelCache?.filePath !== filePath) {
-      const dicomDict = DicomMessage.readFile(readFileArrayBuffer(filePath));
-      this._pixelCache = {
+  #readCached(filePath) {
+    if (this._fileCache?.filePath !== filePath) {
+      this._fileCache = {
         filePath,
-        value: dicomDict.dict["7FE00010"]?.Value,
+        dicomDict: DicomMessage.readFile(readFileArrayBuffer(filePath)),
+        bulkdataMap: null,
       };
     }
-    return this._pixelCache.value;
+    return this._fileCache;
+  }
+
+  readPixelValue(filePath) {
+    return this.#readCached(filePath).dicomDict.dict["7FE00010"]?.Value;
+  }
+
+  /**
+   * The bytes of one non-pixel bulkdata value, by the URI that the scan put
+   * in the metadata. The sanitize filter runs again on the cached file; its
+   * URIs are content hashes, so they match the scan.
+   * @returns {Promise<ArrayBuffer|undefined>}
+   */
+  async readBulkdata(filePath, uri) {
+    const cached = this.#readCached(filePath);
+    cached.bulkdataMap ??= (
+      await part10ToEntry(cached.dicomDict, filePath)
+    ).bulkdataMap;
+    return cached.bulkdataMap.get(uri);
   }
 }

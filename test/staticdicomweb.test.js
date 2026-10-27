@@ -86,7 +86,9 @@ describe("StaticDicomWebStudy tree navigation", () => {
 
     const access = await DicomAccess.createInstance(root, {});
     const study = await access.queryStudy(studyUID);
-    expect(study.natural[0].PatientName[0].Alphabetic).toBe("Doe^Jane");
+    expect([].concat(study.natural[0].PatientName)[0].Alphabetic).toBe(
+      "Doe^Jane"
+    );
 
     const children = await study.queryChildren();
     expect(children).toHaveLength(1);
@@ -118,7 +120,7 @@ describe("StaticDicomWebInstance.storeBulkdataItem", () => {
       BulkDataURI: "bulkdata/original",
     });
 
-    const hash = nodeCrypto.createHash("sha1").update(payload).digest("hex");
+    const hash = nodeCrypto.createHash("sha256").update(payload).digest("hex");
     expect(relative).toBe(
       `../../bulkdata/${hash.substring(0, 3)}/${hash.substring(3, 6)}/${hash}.mht`
     );
@@ -139,6 +141,44 @@ describe("StaticDicomWebInstance.storeBulkdataItem", () => {
       "Content-Type: application/octet-stream;transfer-syntax=1.2.840.10008.1.2.1"
     );
     expect(stored).toContain("bulk-payload-bytes");
+  });
+
+  test("openBulkdata keeps CRLF and '--' bytes inside the payload", async () => {
+    const root = path.join(tmpDir, "bulk-crlf");
+    const access = new StaticDicomWebAccess(root, {});
+    const instance = access
+      .createAccess("1.2.3")
+      .createAccess("4.5.6")
+      .createAccess("7.8.9");
+    const payload = Buffer.from("ab\r\n\r\ncd\r\n--ef", "latin1");
+    const source = {
+      openBulkdata: async () => ({
+        buffer: payload,
+        encapsulated: false,
+        contentType: "application/octet-stream",
+        transferSyntaxUID: "1.2.840.10008.1.2.1",
+      }),
+    };
+
+    // multipart-wrapped by the writer: the wrapper goes, the payload stays
+    const uri = await instance.storeBulkdataItem("00282000", source, {});
+    const wrapped = await instance.openBulkdata("00282000", {
+      BulkDataURI: uri,
+    });
+    expect(Buffer.from(wrapped.buffer).equals(payload)).toBe(true);
+
+    // raw files, including one that looks like a boundary line: returned
+    // byte for byte
+    const lookalike = Buffer.from("--x\r\nab\r\n\r\ncd\r\n--x", "latin1");
+    for (const bytes of [payload, lookalike]) {
+      const rawPath = path.resolve(instance.url, "../..", "bulkdata/raw.bin");
+      fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+      fs.writeFileSync(rawPath, bytes);
+      const raw = await instance.openBulkdata("00282000", {
+        BulkDataURI: "bulkdata/raw.bin",
+      });
+      expect(Buffer.from(raw.buffer).equals(bytes)).toBe(true);
+    }
   });
 
   test("second store of identical bulkdata is a no-op (dedup by hash)", async () => {
