@@ -17,6 +17,7 @@ import { decodeFrame, encodeFrame, imageInfoFromDict } from "../pixel/codec.js";
 import { photometricAfter, updatePixelHeader } from "../pixel/pixelHeader.js";
 import {
   distanceFromQuality,
+  pixelLayoutSyntax,
   resolveOutputSyntax,
 } from "../pixel/transferSyntaxes.js";
 import {
@@ -280,6 +281,8 @@ function checkPyramid(group) {
   }
 }
 
+const RESAMPLED_PHOTOMETRICS = /^(MONOCHROME[12]|RGB|YBR_[A-Z0-9_]+)$/;
+
 function checkBase({ dict, path: file }) {
   const fail = (why) => {
     throw new Error(`${file}: ${why}`);
@@ -289,6 +292,11 @@ function checkBase({ dict, path: file }) {
   }
   if (![1, 3].includes(first(dict, "00280002"))) {
     fail("SamplesPerPixel must be 1 or 3");
+  }
+  // Resampling averages samples, which is wrong for palette indices.
+  const photometric = first(dict, "00280004");
+  if (!RESAMPLED_PHOTOMETRICS.test(photometric ?? "")) {
+    fail(`PhotometricInterpretation ${photometric} cannot be resampled`);
   }
   // A concatenation of one part holds every frame and is accepted.
   if (
@@ -324,9 +332,18 @@ function tilePosition(dict) {
     if (!position) {
       throw new Error(`frame ${i + 1} has no PlanePositionSlideSequence`);
     }
+    const x = Number(first(position, "0048021E")) - 1;
+    const y = Number(first(position, "0048021F")) - 1;
+    // Strips hold whole source tiles; a tile off the grid would lose rows.
+    if (!(x >= 0 && y >= 0 && x % cols === 0 && y % rows === 0)) {
+      throw new Error(
+        `frame ${i + 1} is at (${x + 1}, ${y + 1}), which is not on the ` +
+          `${cols} x ${rows} tile grid; only tiles on the grid are supported`
+      );
+    }
     return {
-      x: Number(first(position, "0048021E")) - 1,
-      y: Number(first(position, "0048021F")) - 1,
+      x,
+      y,
     };
   };
 }
@@ -419,7 +436,7 @@ function levelDataset({
   if (dict["00080019"]) {
     set(dict, "00080019", "UI", uids.pyramid);
   }
-  set(dict, "00200013", "IS", plan.level + 1);
+  set(dict, "00200013", "IS", uids.instance);
   set(dict, "00209311", "CS", "TILED_FULL");
   set(dict, "00280008", "IS", plan.frames);
   set(dict, "00280010", "US", tile);
@@ -444,7 +461,7 @@ function levelDataset({
   updatePixelHeader({
     meta,
     dict,
-    sourceUid: first(base.meta, "00020010"),
+    sourceUid: pixelLayoutSyntax(first(base.meta, "00020010")),
     target,
     photometric,
     lossyRatio,
@@ -478,7 +495,8 @@ async function resizeSeries({
   inPlace,
   dryRun,
   progress,
-  newSeriesUid,
+  remapUid,
+  nextInstance,
 }) {
   const { base } = group;
   checkBase(base);
@@ -488,7 +506,7 @@ async function resizeSeries({
   const width = Number(first(base.dict, "00480006"));
   const height = Number(first(base.dict, "00480007"));
   const spp = first(base.dict, "00280002");
-  const sourceUid = first(base.meta, "00020010");
+  const sourceUid = pixelLayoutSyntax(first(base.meta, "00020010"));
   const levels = planLevels({ width, height, tile, factor });
   const photometric = photometricAfter({
     photometric: first(base.dict, "00280004"),
@@ -523,10 +541,10 @@ async function resizeSeries({
     tiles: levels.reduce((sum, l) => sum + l.frames, 0),
   });
 
-  const seriesUid = inPlace ? group.uid : newSeriesUid(group.uid);
-  const pyramidUid = inPlace
-    ? first(base.dict, "00080019")
-    : dcmjs.data.DicomMetaDictionary.uid();
+  const sourcePyramid = first(base.dict, "00080019");
+  const seriesUid = inPlace ? group.uid : remapUid(group.uid);
+  const pyramidUid =
+    inPlace || !sourcePyramid ? sourcePyramid : remapUid(sourcePyramid);
   const seriesDir = inPlace
     ? path.dirname(base.path)
     : path.join(outDir, seriesUid);
@@ -551,6 +569,7 @@ async function resizeSeries({
     return {
       plan,
       sop,
+      instance: nextInstance(seriesUid),
       finalPath,
       tempPath,
       spool: new FrameSpool(tempPath),
@@ -648,7 +667,12 @@ async function resizeSeries({
         plan: output.plan,
         options,
         photometric,
-        uids: { sop: output.sop, series: seriesUid, pyramid: pyramidUid },
+        uids: {
+          sop: output.sop,
+          series: seriesUid,
+          pyramid: pyramidUid,
+          instance: output.instance,
+        },
         lossyRatio: target.lossy
           ? output.raw / Math.max(1, output.spool.bytes)
           : undefined,
@@ -737,13 +761,19 @@ export async function runWsiResize({
     );
   }
 
-  // Pyramids of one source series (channels, focal planes) share a series.
-  const newSeries = new Map();
-  const newSeriesUid = (uid) => {
-    if (!newSeries.has(uid)) {
-      newSeries.set(uid, dcmjs.data.DicomMetaDictionary.uid());
+  // Pyramids of one source series (channels, focal planes) share the new
+  // series and PyramidUID, and are numbered as one series.
+  const newUids = new Map();
+  const remapUid = (uid) => {
+    if (!newUids.has(uid)) {
+      newUids.set(uid, dcmjs.data.DicomMetaDictionary.uid());
     }
-    return newSeries.get(uid);
+    return newUids.get(uid);
+  };
+  const instances = new Map();
+  const nextInstance = (seriesUid) => {
+    instances.set(seriesUid, (instances.get(seriesUid) ?? 0) + 1);
+    return instances.get(seriesUid);
   };
 
   const reports = [];
@@ -765,7 +795,8 @@ export async function runWsiResize({
           inPlace,
           dryRun,
           progress,
-          newSeriesUid,
+          remapUid,
+          nextInstance,
         })
       );
     } catch (err) {

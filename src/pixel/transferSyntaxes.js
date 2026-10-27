@@ -92,6 +92,15 @@ export function resolveOutputSyntax(nameOrUid) {
   return found;
 }
 
+const DEFLATED_EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1.99";
+
+/**
+ * The syntax that describes the frames of a file. A deflated dataset holds
+ * native Explicit VR Little Endian pixel data once the reader inflates it.
+ */
+export const pixelLayoutSyntax = (uid) =>
+  uid === DEFLATED_EXPLICIT_LITTLE_ENDIAN ? EXPLICIT_LITTLE_ENDIAN : uid;
+
 export function isNativeSyntax(uid) {
   return (
     uid === "1.2.840.10008.1.2" ||

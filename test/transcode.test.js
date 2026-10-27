@@ -405,21 +405,38 @@ test("a lossy target needs --lossy, and the lossy file gets a new SOPInstanceUID
 test("a JPEG labelled YBR_FULL is written as RGB samples with an RGB header", async () => {
   const source = path.join(tmpDir, "ybr-full");
   await writeSyntheticWsi(dcmjs, source, { photometric: "YBR_FULL" });
-  const out = path.join(tmpDir, "ybr-full-le");
-  const result = await transcode([path.join(source, "base.dcm")], {
-    to: "explicit-le",
-    directory: out,
-    quiet: true,
-  });
-  expect(result.code).toBe(0);
-  const file = path.join(out, "base.dcm");
-  expect(await first(file, "00280004")).toBe("RGB");
-  // Frame 0 is the tile at (256, 256); its first pixel in the RGB pattern
-  // of the helper is about (109, 163, 131).
-  const [frame] = await frames(file);
-  [109, 163, 131].forEach((v, c) =>
-    expect(Math.abs(frame[c] - v)).toBeLessThanOrEqual(4)
+  // jxl-jpeg keeps the JPEG bitstream and its label; its decode is RGB too.
+  const recompressed = path.join(tmpDir, "ybr-full-111");
+  expect(
+    (
+      await transcode([path.join(source, "base.dcm")], {
+        to: "jxl-jpeg",
+        directory: recompressed,
+        quiet: true,
+      })
+    ).code
+  ).toBe(0);
+  expect(await first(path.join(recompressed, "base.dcm"), "00280004")).toBe(
+    "YBR_FULL"
   );
+
+  for (const input of [source, recompressed]) {
+    const out = `${input}-le`;
+    const result = await transcode([path.join(input, "base.dcm")], {
+      to: "explicit-le",
+      directory: out,
+      quiet: true,
+    });
+    expect(result.code).toBe(0);
+    const file = path.join(out, "base.dcm");
+    expect(await first(file, "00280004")).toBe("RGB");
+    // Frame 0 is the tile at (256, 256); its first pixel in the RGB pattern
+    // of the helper is about (109, 163, 131).
+    const [frame] = await frames(file);
+    [109, 163, 131].forEach((v, c) =>
+      expect(Math.abs(frame[c] - v)).toBeLessThanOrEqual(4)
+    );
+  }
 });
 
 /**

@@ -77,6 +77,7 @@ async function writeLevel(
     StudyInstanceUID: series.study,
     SeriesInstanceUID: series.uid,
     FrameOfReferenceUID: series.frameOfReference,
+    PyramidUID: series.pyramid,
     Modality: "SM",
     PatientName: "TEST^WSI",
     PatientID: "WSI001",
@@ -179,6 +180,7 @@ export async function writeSyntheticWsi(
     study: uid(),
     uid: uid(),
     frameOfReference: uid(),
+    pyramid: uid(),
   };
   const base = await writeLevel(dcmjs, path.join(dir, `${prefix}base.dcm`), {
     width: 600,

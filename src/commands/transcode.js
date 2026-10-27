@@ -26,6 +26,7 @@ import {
   OUTPUT_ALIASES,
   distanceFromQuality,
   isNativeSyntax,
+  pixelLayoutSyntax,
   resolveOutputSyntax,
 } from "../pixel/transferSyntaxes.js";
 import { planNewSeries } from "../pixel/newSeries.js";
@@ -159,15 +160,6 @@ function keepSyntax(sourceUid) {
     lossy: false,
   };
 }
-
-const DEFLATED_EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1.99";
-
-/**
- * The syntax that describes the frames of a file. A deflated dataset holds
- * native Explicit VR Little Endian pixel data once the reader inflates it.
- */
-const pixelLayoutSyntax = (uid) =>
-  uid === DEFLATED_EXPLICIT_LITTLE_ENDIAN ? EXPLICIT_LITTLE_ENDIAN : uid;
 
 /** Little endian native frames are the same bytes in Explicit VR LE. */
 const LITTLE_ENDIAN_NATIVE = new Set([

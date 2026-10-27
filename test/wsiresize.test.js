@@ -150,6 +150,35 @@ test("--in-place rebuilds each optical path of a series, and deletes only that p
     opticalPath: "2",
     prefix: "b-",
   });
+
+  // -d: both channels stay one series and one pyramid, numbered as one series.
+  const copy = path.join(tmpDir, "channels-copy");
+  expect(
+    (
+      await wsiresize([dir], {
+        directory: copy,
+        preset: "jxl-lossless",
+        tile: "256",
+        factor: "4",
+        quiet: true,
+      })
+    ).code
+  ).toBe(0);
+  const [seriesDir] = fs.readdirSync(copy);
+  const copies = await Promise.all(
+    fs.readdirSync(path.join(copy, seriesDir)).map(async (f) => {
+      const { dict } = await readPart10Header({
+        dcmjs,
+        inputPath: path.join(copy, seriesDir, f),
+      });
+      return ["00080019", "00200013"].map((t) => dict[t].Value[0]);
+    })
+  );
+  expect(copies).toHaveLength(4);
+  expect(new Set(copies.map(([pyramid]) => pyramid)).size).toBe(1);
+  expect(copies[0][0]).not.toBe(a.series.pyramid);
+  expect(new Set(copies.map(([, n]) => n)).size).toBe(4);
+
   const { code } = await wsiresize([dir], {
     "in-place": true,
     preset: "jxl-lossless",

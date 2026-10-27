@@ -94,11 +94,16 @@ rules:
   pixels.
 - **WR-U4b.** Each optical path and each focal plane of a series is a separate pyramid. The
   command rebuilds each one, and never deletes an image of a different optical path or
-  focal plane. With `-d`, the pyramids of one source series go to one new series.
+  focal plane. With `-d`, the pyramids of one source series go to one new series, keep one
+  shared PyramidUID (a new UID for each source PyramidUID), and have InstanceNumber values
+  that do not repeat in the series.
 - **WR-U5.** The command prints the size of the total pixel matrix, the levels before and
   after, and the same totals as TC-U5.
 - **WR-U6.** The pixels of the new base level come from the source base level, at the same
-  positions. Each lower level is the level above it, reduced by the factor.
+  positions. Each lower level is the level above it, reduced by the factor. The command
+  refuses a base that it cannot reproduce this way: a source tile that is not on the tile
+  grid, or a PhotometricInterpretation other than MONOCHROME1, MONOCHROME2, RGB and the YBR
+  family (for example PALETTE COLOR, because an average of palette indices is not a colour).
 - **WR-U7.** No source file changes until all new levels are complete.
 - **WR-U8.** The command shows its progress as TC-U9 states, with one series as one file and
   the frames of its base level as the frames.
@@ -128,8 +133,8 @@ rules:
 - **PX-I8.** `decodeFrame` always returns interleaved samples. It interleaves planar native
   and deflate frames, asks the RLE decoder for interleaved output, and upsamples native
   YBR_FULL_422 (2 bytes for each pixel) to YBR_FULL. `photometricAfter` gives the matching
-  PhotometricInterpretation. libjpeg-turbo (`.50`, `.51`) decodes YBR_FULL to RGB, as it does
-  YBR_FULL_422.
+  PhotometricInterpretation. libjpeg-turbo (`.50`, `.51`) and the JPEG XL JPEG Recompression
+  decoder (`.111`) decode YBR_FULL to RGB, as they do YBR_FULL_422.
 - **PX-I10.** `readPart10Frames` destroys its read stream when the parse ends, also when a
   callback throws.
 - **PX-I9.** `nativeFrameBytes` throws when Rows, Columns or BitsAllocated is not a positive
@@ -157,9 +162,10 @@ rules:
   of dcmjs gives a native value as one buffer. Thus a native input must be smaller than
   2 GiB. A reader that delivers a native value in chunks would let the frames stream too.
 - **TC-I4.** A Deflated Explicit VR Little Endian file (`1.2.840.10008.1.2.1.99`) holds
-  native pixel data after the reader inflates it, so `transcode` treats its frames as
-  Explicit VR Little Endian. The writer does not deflate a dataset, so a rewritten file of
-  this syntax becomes Explicit VR Little Endian.
+  native pixel data after the reader inflates it, so `transcode` and `wsiresize` treat its
+  frames as Explicit VR Little Endian (`pixelLayoutSyntax` in
+  `src/pixel/transferSyntaxes.js`). The writer does not deflate a dataset, so a rewritten
+  file of this syntax becomes Explicit VR Little Endian.
 
 ### `dcmjs wsiresize`
 
