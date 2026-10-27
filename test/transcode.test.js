@@ -354,6 +354,42 @@ test("a file given twice is transcoded once, and two inputs cannot write one out
   );
 });
 
+// User experience: a native thumbnail is valid in any syntax, so it stays.
+test("a native Icon Image Sequence stays when the pixel data is re-encoded", async () => {
+  const file = path.join(tmpDir, "icon", "planar.dcm");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  writeColor(
+    file,
+    {
+      PhotometricInterpretation: "RGB",
+      PlanarConfiguration: 0,
+      IconImageSequence: [
+        {
+          Rows: 2,
+          Columns: 2,
+          SamplesPerPixel: 1,
+          PhotometricInterpretation: "MONOCHROME2",
+          BitsAllocated: 8,
+          BitsStored: 8,
+          HighBit: 7,
+          PixelRepresentation: 0,
+          PixelData: new Uint8Array([1, 2, 3, 4]).buffer,
+        },
+      ],
+    },
+    24
+  );
+  const out = path.join(tmpDir, "icon-rle");
+  expect(
+    (await transcode([file], { to: "rle", directory: out, quiet: true })).code
+  ).toBe(0);
+  const { dict } = await readPart10Header({
+    dcmjs,
+    inputPath: path.join(out, "planar.dcm"),
+  });
+  expect(dict["00880200"].Value[0]["00280010"].Value[0]).toBe(2);
+});
+
 // API: a copy keeps fragments that are not one per frame, as video has.
 test("--new-series copies a video whose fragments are not one per frame", async () => {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
@@ -406,6 +442,13 @@ test("--new-series copies a video whose fragments are not one per frame", async 
   expect(await frameHashes(path.join(out, "video.dcm"))).toEqual(
     await frameHashes(path.join(source, "video.dcm"))
   );
+  // Two fragments for three frames: the Basic Offset Table must be empty,
+  // because it needs one entry for each frame.
+  const bytes = fs.readFileSync(path.join(out, "video.dcm"));
+  const element = bytes.lastIndexOf(
+    Buffer.from([0xe0, 0x7f, 0x10, 0x00, 0x4f, 0x42])
+  );
+  expect(bytes.readUInt32LE(element + 16)).toBe(0);
 });
 
 // User experience: a header that cannot split the pixel data changes nothing.

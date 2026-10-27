@@ -101,6 +101,10 @@ const DEFLATED_EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1.99";
 export const pixelLayoutSyntax = (uid) =>
   uid === DEFLATED_EXPLICIT_LITTLE_ENDIAN ? EXPLICIT_LITTLE_ENDIAN : uid;
 
+/** Little endian native frames: the same bytes in Explicit VR LE. */
+export const isLittleEndianNative = (uid) =>
+  uid === "1.2.840.10008.1.2" || uid === EXPLICIT_LITTLE_ENDIAN;
+
 export function isNativeSyntax(uid) {
   return (
     uid === "1.2.840.10008.1.2" ||

@@ -14,6 +14,7 @@ import {
   JPEG_XL_JPEG_RECOMPRESSION,
   JPEG_XL_LOSSLESS,
   RLE_LOSSLESS,
+  isLittleEndianNative,
   isNativeSyntax,
 } from "./transferSyntaxes.js";
 import { encodeRleFrame } from "./rle.js";
@@ -28,11 +29,6 @@ function codec() {
 }
 
 const first = (dict, tag) => dict[tag]?.Value?.[0];
-
-const LITTLE_ENDIAN_NATIVE = new Set([
-  "1.2.840.10008.1.2",
-  EXPLICIT_LITTLE_ENDIAN,
-]);
 
 /** True when frames are stored as plain samples (native, or deflated). */
 export const hasNativeLayout = (transferSyntaxUID) =>
@@ -166,7 +162,7 @@ export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
   }
   // Little endian native frames are already samples; the codec would only
   // hand them back.
-  if (LITTLE_ENDIAN_NATIVE.has(transferSyntaxUID)) {
+  if (isLittleEndianNative(transferSyntaxUID)) {
     return nativeToInterleaved(frame, imageInfo);
   }
   if (imageInfo.bitsAllocated === 1) {

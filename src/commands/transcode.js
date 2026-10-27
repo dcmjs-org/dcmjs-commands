@@ -18,6 +18,7 @@ import {
   transcodeFrame,
 } from "../pixel/codec.js";
 import {
+  dropEncapsulatedIcon,
   photometricAfter,
   renewSopInstanceUid,
   updatePixelHeader,
@@ -26,6 +27,7 @@ import {
   EXPLICIT_LITTLE_ENDIAN,
   OUTPUT_ALIASES,
   distanceFromQuality,
+  isLittleEndianNative,
   isNativeSyntax,
   pixelLayoutSyntax,
   resolveOutputSyntax,
@@ -170,14 +172,6 @@ function keepSyntax(sourceUid) {
   };
 }
 
-const ICON_IMAGE_SEQUENCE = "00880200";
-
-/** Little endian native frames are the same bytes in Explicit VR LE. */
-const LITTLE_ENDIAN_NATIVE = new Set([
-  "1.2.840.10008.1.2",
-  EXPLICIT_LITTLE_ENDIAN,
-]);
-
 /**
  * Transcodes one file to `outputPath` (which may be the input). Returns the
  * before/after sizes, or `{ skipped: reason }`.
@@ -235,7 +229,7 @@ export async function transcodeFile({
         copyFrames =
           target.uid === sourceUid ||
           (target.uid === EXPLICIT_LITTLE_ENDIAN &&
-            LITTLE_ENDIAN_NATIVE.has(sourceUid));
+            isLittleEndianNative(sourceUid));
         // .111 → .50 rebuilds the original JPEG, so it is not lossy.
         lossy =
           !copyFrames &&
@@ -307,9 +301,9 @@ export async function transcodeFile({
       return skip ? { skipped: skip, before } : { before, sourceUid: fileUid };
     }
 
-    // Copied frames keep their fragments, which need not be one per frame
-    // (video); only decoded frames must match NumberOfFrames.
-    if (read.hasPixelData && !copyFrames) {
+    // Copied encapsulated frames keep their fragments, which need not be one
+    // per frame (video); decoded and native frames must match NumberOfFrames.
+    if (read.hasPixelData && !(copyFrames && read.encapsulated)) {
       checkFrameCount(read);
     }
     const { meta, dict } = read;
@@ -324,8 +318,7 @@ export async function transcodeFile({
     } else if (copyFrames) {
       meta["00020010"] = { vr: "UI", Value: [target.uid] };
     } else {
-      // The icon keeps the old encoding; it is Type 3, so it goes.
-      delete dict[ICON_IMAGE_SEQUENCE];
+      dropEncapsulatedIcon(dict);
       updatePixelHeader({
         meta,
         dict,
@@ -395,17 +388,23 @@ export async function runTranscode({
     stderr(`dcmjs transcode: ${err.message}`);
     return 1;
   }
-  // -d must never replace an input (TC-U2).
-  const intoItself = outDir
-    ? inputs.find(
-        ([file, root]) =>
-          path.resolve(outDir, path.relative(root, file)) === path.resolve(file)
+  // -d must never replace an input (TC-U2): no output path may be the path
+  // of any input. Windows and macOS file names ignore case.
+  const pathKey =
+    process.platform === "win32" || process.platform === "darwin"
+      ? (file) => path.resolve(file).toLowerCase()
+      : (file) => path.resolve(file);
+  const inputKeys = new Set(inputs.map(([file]) => pathKey(file)));
+  const replaced = outDir
+    ? inputs.find(([file, root]) =>
+        inputKeys.has(pathKey(path.join(outDir, path.relative(root, file))))
       )
     : undefined;
-  if (intoItself) {
+  if (replaced) {
     stderr(
-      `dcmjs transcode: -d ${outDir} would replace ${intoItself[0]}; give a ` +
-        "different directory, or leave out -d to convert in place"
+      `dcmjs transcode: -d ${outDir} would replace an input (the output of ` +
+        `${replaced[0]}); give a directory outside the inputs, or leave out ` +
+        "-d to convert in place"
     );
     return 1;
   }

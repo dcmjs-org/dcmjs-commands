@@ -114,17 +114,22 @@ function itemHeader(group, element, length) {
 
 /**
  * The encapsulated PixelData element up to its first fragment: header,
- * Basic Offset Table (empty when an offset would not fit in 32 bits), and
- * the per-frame item headers are written by the caller.
+ * Basic Offset Table, and the per-frame item headers are written by the
+ * caller. The table is empty when an offset would not fit in 32 bits, or
+ * when the items are not one per frame (copied video fragments), because
+ * it must have one entry for each frame.
  */
-function encapsulatedHeader(lengths) {
+function encapsulatedHeader(lengths, numberOfFrames) {
   const offsets = [];
   let offset = 0;
   for (const length of lengths) {
     offsets.push(offset);
     offset += 8 + length + (length % 2);
   }
-  const useBot = offsets.length > 1 && offsets.at(-1) <= MAX_BOT_OFFSET;
+  const useBot =
+    offsets.length > 1 &&
+    offsets.length === numberOfFrames &&
+    offsets.at(-1) <= MAX_BOT_OFFSET;
   const element = Buffer.alloc(12);
   element.writeUInt16LE(0x7fe0, 0);
   element.writeUInt16LE(0x0010, 2);
@@ -228,7 +233,10 @@ export async function writePart10WithFrames({
 
   const bitsAllocated = header["00280100"]?.Value?.[0] ?? 8;
   const pixelElementHeader = encapsulated
-    ? encapsulatedHeader(spool.lengths)
+    ? encapsulatedHeader(
+        spool.lengths,
+        Number(header["00280008"]?.Value?.[0] ?? 1)
+      )
     : nativeHeader(spool.bytes, bitsAllocated > 8 ? "OW" : "OB");
   const body = encapsulated ? encapsulatedBody(spool) : nativeBody(spool);
 
