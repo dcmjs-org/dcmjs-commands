@@ -1,14 +1,15 @@
 // src/dcmjsBundle.js
 //
-// Single import point for the dcmjs library; see loadEventStream and the
-// default export for how the composite surface is reassembled.
+// Single import point for the dcmjs library; see the default export for
+// how the composite surface is reassembled.
+//
+// Everything loads via createRequire: since dcmjs-org/dcmjs#618
+// (1.0.0-beta.5) the packages ship real CommonJS builds behind "require"
+// conditions, which load identically under node and under jest's module
+// pipeline.
 
-import path from "node:path";
+import { createRequire } from "node:module";
 
-// process.getBuiltinModule reaches node's real module system even under
-// jest, whose node:module shim cannot load the ESM sources the
-// @dcmjs-org packages ship (node >= 22.12 require(esm) can).
-const { createRequire } = process.getBuiltinModule("node:module");
 const require = createRequire(import.meta.url);
 
 let base;
@@ -22,33 +23,9 @@ try {
   );
 }
 
+const eventStream = require("dcmjs/eventStream");
 const { media, encapsulated, image } = require("@dcmjs-org/media");
 const fhirSink = require("@dcmjs-org/fhir");
-
-/**
- * Load the `dcmjs/eventStream` subpath export.
- *
- * The subpath has only an `import` condition. Node loads it through the
- * public export. Jest's ESM loader treats the built `.es.js` file as CJS
- * and cannot parse it, so only then fall back to requiring the built file
- * next to the base bundle. Remove the fallback once dcmjs adds a
- * `require` condition for `./eventStream`.
- */
-async function loadEventStream() {
-  try {
-    return await import("dcmjs/eventStream");
-  } catch (importError) {
-    try {
-      return require(
-        path.join(path.dirname(require.resolve("dcmjs")), "eventStream.es.js")
-      );
-    } catch {
-      throw importError;
-    }
-  }
-}
-
-const eventStream = await loadEventStream();
 
 const { DicomMessage, DicomMetaDictionary } = base.data;
 
