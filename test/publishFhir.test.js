@@ -62,6 +62,20 @@ describe("buildFhirLayer", () => {
     expect(layer.warnings).toEqual([]);
   });
 
+  test("Patient ids never collide for missing or sanitized PatientIDs", () => {
+    const idFor = (overrides) =>
+      buildFhirLayer({ naturals: [natural(overrides)] }).patient.id;
+    const noIdA = idFor({ PatientID: undefined, StudyInstanceUID: "2.25.1" });
+    const noIdB = idFor({ PatientID: undefined, StudyInstanceUID: "2.25.2" });
+    expect(noIdA).toMatch(/^unidentified-patient-[0-9a-f]{12}$/);
+    expect(noIdA).not.toBe(noIdB);
+
+    const slash = idFor({ PatientID: "A/1" });
+    const space = idFor({ PatientID: "A 1" });
+    expect(slash).toMatch(/^A-1-[0-9a-f]{12}$/);
+    expect(slash).not.toBe(space);
+  });
+
   test("provided Patient is embedded verbatim with an assigned id", () => {
     const layer = buildFhirLayer({
       naturals: [natural()],

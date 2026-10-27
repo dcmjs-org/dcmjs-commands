@@ -49,6 +49,27 @@ function toFhirId(value, fallback) {
   return cleaned || fallback;
 }
 
+const shortHash = (text) =>
+  createHash("sha256").update(String(text)).digest("hex").slice(0, 12);
+
+/**
+ * FHIR Patient id for a patient identifier. A value that is already a
+ * valid FHIR id is used as is. A value that sanitizing changes gets a hash
+ * suffix of the original, so "A/1" and "A 1" stay distinct patients. A
+ * missing value gets "unidentified-patient-<hash of the study UID>", so
+ * two studies without a PatientID never share (and overwrite) one Patient.
+ */
+export function patientIdFor(value, studyInstanceUID) {
+  if (value === undefined || value === null || value === "") {
+    return `unidentified-patient-${shortHash(studyInstanceUID)}`;
+  }
+  const cleaned = toFhirId(value, "patient");
+  if (cleaned === String(value)) {
+    return cleaned;
+  }
+  return `${cleaned.substring(0, 51)}-${shortHash(value)}`;
+}
+
 function readResource(filePath, expectedType) {
   let resource;
   try {
@@ -168,9 +189,9 @@ export function buildFhirLayer({
     };
   }
   if (!patient.id) {
-    patient.id = toFhirId(
+    patient.id = patientIdFor(
       patient.identifier?.[0]?.value ?? representative.PatientID,
-      "unidentified-patient"
+      representative.StudyInstanceUID
     );
   }
 
