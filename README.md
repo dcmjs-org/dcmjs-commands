@@ -220,7 +220,8 @@ Patient; if it disagrees with the instance tags you get a warning (run
 ### transcode
 
 Rewrite the pixel data of DICOM files in another transfer syntax, one
-frame at a time, so file size does not matter. Files are replaced in place
+frame at a time, so memory depends on the frame size, not the number of
+frames (uncompressed pixel data is held whole, up to 2 GiB). Files are replaced in place
 unless `-d` names an output directory. JPEG Baseline whole-slide images
 recompress losslessly to JPEG XL (`jxl-jpeg`, 1.2.840.10008.1.2.4.111),
 and `--to jpeg` gives back the same JPEG bytes. Lossy targets need

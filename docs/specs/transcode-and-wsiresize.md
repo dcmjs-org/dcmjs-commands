@@ -38,8 +38,10 @@ rules:
   `LossyImageCompressionMethod`).
 - **TC-U5.** The command prints, before and after the conversion: the number of instances,
   the number of frames, the header bytes, the image bytes, and the file bytes.
-- **TC-U6.** The command can convert a file of any size. The size of the file does not
-  change the memory that the command uses.
+- **TC-U6.** The command can convert a file of any size, one frame at a time. The memory
+  that the command uses depends on the size of one frame, not on the number of frames in
+  the file. Exception: a native (uncompressed) PixelData value is held in memory whole
+  (TC-I2), so its size, not the size of one frame, sets the memory for native input.
 - **TC-U7.** If the command fails on a file, that file does not change, and no partial file
   stays in the output location.
 - **TC-U8.** `--dry-run` lists the files that the command would change, and writes nothing.
@@ -67,8 +69,9 @@ rules:
   file describe the samples that the file holds. A format that holds its own colour space
   (JPEG, JPEG XL) can keep the value of the source when the bitstream does not change. A
   format that holds plain samples (explicit-le, rle, deflate) gets the value of the written
-  samples. For example, native YBR_FULL_422 written as rle or deflate becomes YBR_FULL, and
-  planar colour becomes PlanarConfiguration 0.
+  samples. For example, native YBR_FULL_422 written as rle or deflate becomes YBR_FULL, a
+  JPEG labelled YBR_FULL that is decoded becomes RGB, and planar colour becomes
+  PlanarConfiguration 0.
 
 ### `dcmjs wsiresize`
 
@@ -125,7 +128,10 @@ rules:
 - **PX-I8.** `decodeFrame` always returns interleaved samples. It interleaves planar native
   and deflate frames, asks the RLE decoder for interleaved output, and upsamples native
   YBR_FULL_422 (2 bytes for each pixel) to YBR_FULL. `photometricAfter` gives the matching
-  PhotometricInterpretation.
+  PhotometricInterpretation. libjpeg-turbo (`.50`, `.51`) decodes YBR_FULL to RGB, as it does
+  YBR_FULL_422.
+- **PX-I10.** `readPart10Frames` destroys its read stream when the parse ends, also when a
+  callback throws.
 - **PX-I9.** `nativeFrameBytes` throws when Rows, Columns or BitsAllocated is not a positive
   whole number. `transcode` checks this before a decode. Both commands check that the
   number of frames read equals NumberOfFrames before they write a file.
@@ -148,7 +154,12 @@ rules:
   frames are copied without a codec, and a file without pixel data gets only the new
   header.
 - **TC-I2.** Native input frames come from one PixelData buffer, because the stream reader
-  gives a native value as one buffer. Thus a native input must be smaller than 2 GiB.
+  of dcmjs gives a native value as one buffer. Thus a native input must be smaller than
+  2 GiB. A reader that delivers a native value in chunks would let the frames stream too.
+- **TC-I4.** A Deflated Explicit VR Little Endian file (`1.2.840.10008.1.2.1.99`) holds
+  native pixel data after the reader inflates it, so `transcode` treats its frames as
+  Explicit VR Little Endian. The writer does not deflate a dataset, so a rewritten file of
+  this syntax becomes Explicit VR Little Endian.
 
 ### `dcmjs wsiresize`
 
@@ -160,7 +171,10 @@ rules:
   reads them back in raster order.
 - **WR-I3.** Each new level is `TILED_FULL`, has no PerFrameFunctionalGroupsSequence and no
   concatenation attributes, has ImageType `DERIVED\PRIMARY\VOLUME\(NONE|RESAMPLED)`, and has
-  its PixelSpacing multiplied by the scale of the level.
+  its PixelSpacing multiplied by the scale of the level. A per-frame macro of the base that
+  is the same in every frame (for example PixelMeasures) moves to the shared groups. The
+  plane position and the frame content are dropped, because TILED_FULL implies them. A
+  per-frame macro that differs between frames is refused before the decode starts.
 - **WR-I4.** Only 8-bit samples, one or three samples per pixel, and one focal plane and
   one optical path in each image are supported. A concatenation of more than one part is
   refused.
@@ -169,8 +183,10 @@ rules:
   position. The command refuses a group with two full-size VOLUME images, because then it
   cannot tell the pyramids apart. With `-d`, a series that has more than one group gets file
   names `<SOPInstanceUID>.dcm` in place of `level-<n>.dcm`.
-- **WR-I5.** Partial edge tiles are filled with white (255), or with black (0) for
-  MONOCHROME2.
+- **WR-I5.** Partial edge tiles are filled with white: 255 for RGB, (255, 128, 128) for
+  YBR_FULL. MONOCHROME2 is filled with black (0), and MONOCHROME1 with black (255).
+- **WR-I7.** The spool of out-of-order source frames is removed in the same `finally` as
+  the output spools, so a failed read leaves no temporary file.
 
 ## Measured results
 

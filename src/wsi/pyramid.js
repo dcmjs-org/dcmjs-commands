@@ -33,6 +33,20 @@ export function planLevels({ width, height, tile, factor }) {
   }
 }
 
+/** Fills `data` with `background`: one value, or one value per sample. */
+function fillPixels(data, background) {
+  if (typeof background === "number") {
+    return data.fill(background);
+  }
+  data.set(background);
+  for (let filled = background.length; filled < data.length;) {
+    const n = Math.min(filled, data.length - filled);
+    data.copyWithin(filled, 0, n);
+    filled += n;
+  }
+  return data;
+}
+
 class LevelBuilder {
   /**
    * @param {object} plan one entry of planLevels()
@@ -82,7 +96,7 @@ class LevelBuilder {
     }
     const rows = Math.min(this.filled, this.plan.height - this.rowsDone);
     for (let tx = 0; tx < this.plan.tilesX; tx++) {
-      this.tileImage.data.fill(this.background);
+      fillPixels(this.tileImage.data, this.background);
       copyRect(
         this.band,
         tx * this.tile,
@@ -161,7 +175,7 @@ export class TileRowAssembler {
     this.onStrip = onStrip;
     this.background = background;
     this.strip = {
-      data: new Uint8Array(tileHeight * width * spp).fill(background),
+      data: fillPixels(new Uint8Array(tileHeight * width * spp), background),
       width,
       height: tileHeight,
       spp,
@@ -191,7 +205,7 @@ export class TileRowAssembler {
         data: this.strip.data.subarray(0, rows * this.width * this.strip.spp),
       });
     }
-    this.strip.data.fill(this.background);
+    fillPixels(this.strip.data, this.background);
     this.rowY += this.tileHeight;
   }
 

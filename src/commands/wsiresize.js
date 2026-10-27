@@ -349,13 +349,58 @@ const formatDs = (value) => {
   return text.length <= 16 ? text : value.toExponential(9);
 };
 
+/** Per-frame macros that TILED_FULL makes implicit, so they are dropped. */
+const IMPLIED_PER_FRAME = new Set(["0048021A", "00209111"]);
+
+/**
+ * The shared functional groups item of the new levels: the base's shared
+ * groups, plus each per-frame macro (for example PixelMeasures) that is the
+ * same in every frame. Throws when such a macro differs between frames,
+ * because one TILED_FULL level cannot hold it.
+ */
+function sharedGroups({ dict, path: file }) {
+  const shared = structuredClone(dict["52009229"]?.Value?.[0] ?? {});
+  const perFrame = dict["52009230"]?.Value ?? [];
+  for (const tag of Object.keys(perFrame[0] ?? {})) {
+    if (IMPLIED_PER_FRAME.has(tag) || shared[tag]) {
+      continue;
+    }
+    const value = JSON.stringify(perFrame[0][tag]);
+    if (perFrame.some((item) => JSON.stringify(item[tag]) !== value)) {
+      throw new Error(
+        `${file}: the per-frame functional group (${tag}) differs between ` +
+          "frames, so it cannot move to a TILED_FULL level"
+      );
+    }
+    shared[tag] = structuredClone(perFrame[0][tag]);
+  }
+  return shared;
+}
+
+/** White in YBR_FULL; 0 for MONOCHROME2 and 255 otherwise (WR-I5). */
+function backgroundFor(photometric) {
+  if (photometric === "YBR_FULL") {
+    return [255, 128, 128];
+  }
+  return photometric === "MONOCHROME2" ? 0 : 255;
+}
+
 /** The dataset of one output level, derived from the base level. */
-function levelDataset({ base, plan, options, photometric, uids, lossyRatio }) {
+function levelDataset({
+  base,
+  shared,
+  plan,
+  options,
+  photometric,
+  uids,
+  lossyRatio,
+}) {
   const meta = structuredClone(base.meta);
   const dict = structuredClone(base.dict);
   const { tile, factor, target } = options;
 
   delete dict["52009230"];
+  dict["52009229"] = { vr: "SQ", Value: [structuredClone(shared)] };
   for (const tag of CONCATENATION_TAGS) {
     delete dict[tag];
   }
@@ -438,6 +483,7 @@ async function resizeSeries({
   const { base } = group;
   checkBase(base);
   checkPyramid(group);
+  const shared = sharedGroups(base);
   const { tile, factor, target, encode } = options;
   const width = Number(first(base.dict, "00480006"));
   const height = Number(first(base.dict, "00480007"));
@@ -449,7 +495,7 @@ async function resizeSeries({
     sourceUid,
     target,
   });
-  const background = photometric === "MONOCHROME2" ? 0 : 255;
+  const background = backgroundFor(photometric);
 
   const report = {
     series: group.uid,
@@ -577,6 +623,7 @@ async function resizeSeries({
           }
         : addFrame,
     });
+    checkFrameCount(read);
     if (sourceSpool) {
       const reader = await sourceSpool.openReader();
       try {
@@ -585,10 +632,8 @@ async function resizeSeries({
         }
       } finally {
         await reader.close();
-        await sourceSpool.remove();
       }
     }
-    checkFrameCount(read);
     await assembler.finish();
     await builder.finish();
     addTotals(before, read);
@@ -599,6 +644,7 @@ async function resizeSeries({
     for (const output of outputs) {
       const { meta, dict } = levelDataset({
         base,
+        shared,
         plan: output.plan,
         options,
         photometric,
@@ -631,6 +677,7 @@ async function resizeSeries({
       }
     }
   } finally {
+    await sourceSpool?.remove();
     for (const output of outputs) {
       await output.spool.remove();
       fs.rmSync(output.tempPath, { force: true });

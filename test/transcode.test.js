@@ -6,6 +6,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import dcmjs from "../src/dcmjsBundle.js";
 import { runTranscode } from "../src/commands/transcode.js";
 import {
@@ -398,4 +399,77 @@ test("a lossy target needs --lossy, and the lossy file gets a new SOPInstanceUID
   expect(dict["00280004"].Value[0]).toBe("RGB");
   expect(dict["00282114"].Value).toEqual(["ISO_10918_1", "ISO_18181_1"]);
   expect(dict["00282112"].Value).toHaveLength(2);
+});
+
+// API: libjpeg-turbo gives RGB for a JPEG labelled YBR_FULL (TC-U13).
+test("a JPEG labelled YBR_FULL is written as RGB samples with an RGB header", async () => {
+  const source = path.join(tmpDir, "ybr-full");
+  await writeSyntheticWsi(dcmjs, source, { photometric: "YBR_FULL" });
+  const out = path.join(tmpDir, "ybr-full-le");
+  const result = await transcode([path.join(source, "base.dcm")], {
+    to: "explicit-le",
+    directory: out,
+    quiet: true,
+  });
+  expect(result.code).toBe(0);
+  const file = path.join(out, "base.dcm");
+  expect(await first(file, "00280004")).toBe("RGB");
+  // Frame 0 is the tile at (256, 256); its first pixel in the RGB pattern
+  // of the helper is about (109, 163, 131).
+  const [frame] = await frames(file);
+  [109, 163, 131].forEach((v, c) =>
+    expect(Math.abs(frame[c] - v)).toBeLessThanOrEqual(4)
+  );
+});
+
+/**
+ * Rewrites a native Explicit VR Little Endian `file` as Deflated Explicit VR
+ * Little Endian (.1.2.1.99): the same meta, then the deflated dataset.
+ */
+async function deflateDataset(file) {
+  const bytes = fs.readFileSync(file);
+  const bodyStart = 144 + bytes.readUInt32LE(140);
+  const { meta } = await readPart10Header({ dcmjs, inputPath: file });
+  meta["00020010"] = { vr: "UI", Value: ["1.2.840.10008.1.2.1.99"] };
+  const head = new dcmjs.data.DicomDict(meta);
+  head.dict = {};
+  const headBytes = Buffer.from(head.write());
+  const metaEnd = 144 + headBytes.readUInt32LE(140);
+  fs.writeFileSync(
+    file,
+    Buffer.concat([
+      headBytes.subarray(0, metaEnd),
+      zlib.deflateRawSync(bytes.subarray(bodyStart)),
+    ])
+  );
+}
+
+// API: a deflated dataset holds native frames; the copy must stay readable.
+test("--new-series copies a Deflated Explicit VR Little Endian file as explicit-le with the same frames", async () => {
+  const source = path.join(tmpDir, "deflated");
+  fs.mkdirSync(source, { recursive: true });
+  const file = path.join(source, "planar.dcm");
+  writeColor(
+    file,
+    { PhotometricInterpretation: "RGB", PlanarConfiguration: 0 },
+    24
+  );
+  const original = await frames(file);
+  await deflateDataset(file);
+  expect(
+    (await readPart10Header({ dcmjs, inputPath: file })).meta["00020010"]
+      .Value[0]
+  ).toBe("1.2.840.10008.1.2.1.99");
+
+  const out = path.join(tmpDir, "deflated-copy");
+  const result = await transcode([source], {
+    "new-series": true,
+    directory: out,
+    quiet: true,
+  });
+  expect(result.code).toBe(0);
+  const copy = path.join(out, "planar.dcm");
+  const { meta } = await readPart10Header({ dcmjs, inputPath: copy });
+  expect(meta["00020010"].Value[0]).toBe("1.2.840.10008.1.2.1");
+  expect(await frames(copy)).toEqual(original);
 });

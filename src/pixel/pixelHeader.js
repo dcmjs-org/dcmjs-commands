@@ -16,6 +16,12 @@ const DECODED_AS_RGB = new Set([
   "YBR_RCT",
 ]);
 
+/** JPEG Baseline and Extended: libjpeg-turbo converts YBR_FULL to RGB too. */
+const LIBJPEG_TURBO = new Set([
+  "1.2.840.10008.1.2.4.50",
+  "1.2.840.10008.1.2.4.51",
+]);
+
 const set = (dict, tag, vr, ...Value) => {
   dict[tag] = { vr, Value };
 };
@@ -33,7 +39,8 @@ export function photometricAfter({ photometric, sourceUid, target }) {
     ? photometric === "YBR_FULL_422"
       ? "YBR_FULL"
       : photometric
-    : DECODED_AS_RGB.has(photometric)
+    : DECODED_AS_RGB.has(photometric) ||
+        (photometric === "YBR_FULL" && LIBJPEG_TURBO.has(sourceUid))
       ? "RGB"
       : photometric;
   if (target.uid === "1.2.840.10008.1.2.4.50" && decoded === "RGB") {

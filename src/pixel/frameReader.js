@@ -316,10 +316,16 @@ export async function readPart10Frames({
     }
   });
 
-  await fromPart10Stream(
-    fs.createReadStream(inputPath, { highWaterMark: 8 * 1024 * 1024 }),
-    listener
-  );
+  const input = fs.createReadStream(inputPath, {
+    highWaterMark: 8 * 1024 * 1024,
+  });
+  try {
+    await fromPart10Stream(input, listener);
+  } finally {
+    // A callback that throws (for example the --lossy refusal) ends the
+    // parse early; the file must not keep streaming.
+    input.destroy();
+  }
 
   const { meta, dict } = listener.result;
   delete dict[EXTENDED_OFFSET_TABLE];

@@ -39,9 +39,10 @@ import { Progress } from "../pixel/progress.js";
 export const transcodeUsage = `usage: dcmjs transcode <file-or-directory>... --to <syntax> [options]
 
 Rewrites the pixel data of each DICOM file in another transfer syntax. Each
-file is read and written as a stream, one frame at a time, so the file size
-does not matter. By default each file is replaced in place: the new file is
-written next to it and then renamed over it.
+file is read and written as a stream, one frame at a time, so the memory
+depends on the frame size, not the number of frames (uncompressed pixel
+data is held whole, up to 2 GiB). By default each file is replaced in
+place: the new file is written next to it and then renamed over it.
 
 Options:
   -t, --to <syntax>       ${OUTPUT_ALIASES.join(", ")}, or a transfer syntax UID.
@@ -159,6 +160,15 @@ function keepSyntax(sourceUid) {
   };
 }
 
+const DEFLATED_EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1.99";
+
+/**
+ * The syntax that describes the frames of a file. A deflated dataset holds
+ * native Explicit VR Little Endian pixel data once the reader inflates it.
+ */
+const pixelLayoutSyntax = (uid) =>
+  uid === DEFLATED_EXPLICIT_LITTLE_ENDIAN ? EXPLICIT_LITTLE_ENDIAN : uid;
+
 /** Little endian native frames are the same bytes in Explicit VR LE. */
 const LITTLE_ENDIAN_NATIVE = new Set([
   "1.2.840.10008.1.2",
@@ -186,6 +196,7 @@ export async function transcodeFile({
   progress,
   rewrite,
 }) {
+  let fileUid;
   let sourceUid;
   let imageInfo;
   let target = requested;
@@ -200,9 +211,10 @@ export async function transcodeFile({
       dcmjs,
       inputPath,
       onHeader: ({ meta, dict }) => {
-        sourceUid = meta["00020010"]?.Value?.[0];
+        fileUid = meta["00020010"]?.Value?.[0];
+        sourceUid = pixelLayoutSyntax(fileUid);
         imageInfo = imageInfoFromDict(dict);
-        if (!requested || requested.uid === sourceUid) {
+        if (!requested || requested.uid === fileUid) {
           skip = requested && `already ${requested.name}`;
         } else if (!hasDecoder(sourceUid)) {
           skip = `no decoder for transfer syntax ${sourceUid}`;
@@ -267,7 +279,8 @@ export async function transcodeFile({
       },
     });
 
-    sourceUid ??= read.transferSyntaxUID;
+    fileUid ??= read.transferSyntaxUID;
+    sourceUid ??= pixelLayoutSyntax(fileUid);
     if (!read.hasPixelData && !rewrite) {
       skip = "no pixel data";
     }
@@ -278,7 +291,7 @@ export async function transcodeFile({
     };
     if (skip || dryRun) {
       await spool?.remove();
-      return skip ? { skipped: skip, before } : { before, sourceUid };
+      return skip ? { skipped: skip, before } : { before, sourceUid: fileUid };
     }
 
     if (read.hasPixelData) {
@@ -286,6 +299,10 @@ export async function transcodeFile({
     }
     const { meta, dict } = read;
     rewrite?.(meta, dict);
+    if (fileUid !== sourceUid) {
+      // The writer does not deflate the dataset.
+      meta["00020010"] = { vr: "UI", Value: [sourceUid] };
+    }
     if (!read.hasPixelData) {
       // Header only: the body keeps its transfer syntax.
       target = { encapsulated: false };
@@ -326,7 +343,7 @@ export async function transcodeFile({
         before,
         after: { frames: read.frames, ...written },
         dropped: written.dropped,
-        sourceUid,
+        sourceUid: fileUid,
       };
     } finally {
       fs.rmSync(tempPath, { force: true });

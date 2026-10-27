@@ -180,6 +180,45 @@ test("--in-place rebuilds each optical path of a series, and deletes only that p
   }
 });
 
+// API: a TILED_FULL level keeps the per-frame macros that are the same for all frames.
+test("PixelMeasures in the per-frame groups move to the shared groups of each level", async () => {
+  const wsi = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "per-frame"), {
+    perFrameMeasures: true,
+  });
+  const { code, text } = await wsiresize([wsi.base.path], {
+    directory: path.join(tmpDir, "per-frame-out"),
+    preset: "jxl-lossless",
+    tile: "256",
+    factor: "2",
+    json: true,
+    quiet: true,
+  });
+  expect(code).toBe(0);
+  for (const written of JSON.parse(text).series[0].written) {
+    const { dict } = await readPart10Header({ dcmjs, inputPath: written.path });
+    const spacing =
+      dict["52009229"].Value[0]["00289110"].Value[0]["00280030"].Value;
+    expect(Number(spacing[0])).toBeCloseTo(0.0005 * 2 ** written.level, 10);
+  }
+});
+
+// User experience: a failed rebuild leaves no partial or temporary file (WR-U7).
+test("a truncated base fails, and leaves the directory as it was", async () => {
+  const wsi = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "truncated"));
+  const dir = path.dirname(wsi.base.path);
+  const bytes = fs.readFileSync(wsi.base.path);
+  fs.writeFileSync(wsi.base.path, bytes.subarray(0, bytes.length - 2000));
+  const before = fs.readdirSync(dir).sort();
+
+  const { code } = await wsiresize([dir], {
+    "in-place": true,
+    preset: "jxl-lossless",
+    quiet: true,
+  });
+  expect(code).toBe(1);
+  expect(fs.readdirSync(dir).sort()).toEqual(before);
+});
+
 test("needs -d or --in-place", async () => {
   const { code, err } = await wsiresize([tmpDir], {});
   expect(code).toBe(1);

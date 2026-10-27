@@ -46,7 +46,18 @@ async function encodeTile(x0, y0, tile, scale) {
 async function writeLevel(
   dcmjs,
   file,
-  { width, height, tile, scale, imageType, series, order, opticalPath }
+  {
+    width,
+    height,
+    tile,
+    scale,
+    imageType,
+    series,
+    order,
+    opticalPath,
+    photometric = "YBR_FULL_422",
+    perFrameMeasures,
+  }
 ) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
   const tilesX = Math.ceil(width / tile);
@@ -75,7 +86,7 @@ async function writeLevel(
     Columns: tile,
     NumberOfFrames: frames.length,
     SamplesPerPixel: 3,
-    PhotometricInterpretation: "YBR_FULL_422",
+    PhotometricInterpretation: photometric,
     PlanarConfiguration: 0,
     BitsAllocated: 8,
     BitsStored: 8,
@@ -113,6 +124,13 @@ async function writeLevel(
   if (opticalPath) {
     dataset.OpticalPathSequence = [{ OpticalPathIdentifier: opticalPath }];
   }
+  if (perFrameMeasures && order) {
+    const measures = dataset.SharedFunctionalGroupsSequence[0];
+    delete dataset.SharedFunctionalGroupsSequence;
+    for (const item of dataset.PerFrameFunctionalGroupsSequence) {
+      Object.assign(item, structuredClone(measures));
+    }
+  }
 
   const dict = DicomMetaDictionary.denaturalizeDataset(dataset);
   dict["7FE00010"] = {
@@ -141,11 +159,19 @@ async function writeLevel(
  * Writes the pyramid into `dir`. The base is 600 x 400 in 256 px tiles,
  * stored in the order 4, 1, 5, 0, 2, 3. Give `series` and `opticalPath` to
  * add another channel to an existing series, with a file name `prefix`.
+ * `photometric` labels every level; `perFrameMeasures` puts the base
+ * PixelMeasures in the per-frame groups only.
  */
 export async function writeSyntheticWsi(
   dcmjs,
   dir,
-  { series: given, opticalPath, prefix = "" } = {}
+  {
+    series: given,
+    opticalPath,
+    prefix = "",
+    photometric,
+    perFrameMeasures,
+  } = {}
 ) {
   fs.mkdirSync(dir, { recursive: true });
   const { uid } = dcmjs.data.DicomMetaDictionary;
@@ -163,6 +189,8 @@ export async function writeSyntheticWsi(
     series,
     order: [4, 1, 5, 0, 2, 3],
     opticalPath,
+    photometric,
+    perFrameMeasures,
   });
   const half = await writeLevel(dcmjs, path.join(dir, `${prefix}half.dcm`), {
     width: 300,
@@ -172,6 +200,7 @@ export async function writeSyntheticWsi(
     imageType: "VOLUME",
     series,
     opticalPath,
+    photometric,
   });
   const label = await writeLevel(dcmjs, path.join(dir, `${prefix}label.dcm`), {
     width: 128,
@@ -181,6 +210,7 @@ export async function writeSyntheticWsi(
     imageType: "LABEL",
     series,
     opticalPath,
+    photometric,
   });
   return { series, base, half, label };
 }
