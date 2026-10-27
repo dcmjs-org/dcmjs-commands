@@ -57,6 +57,7 @@ async function writeLevel(
     opticalPath,
     photometric = "YBR_FULL_422",
     perFrameMeasures,
+    zOffset,
   }
 ) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
@@ -114,6 +115,9 @@ async function writeLevel(
             {
               ColumnPositionInTotalImagePixelMatrix: x + 1,
               RowPositionInTotalImagePixelMatrix: y + 1,
+              ...(zOffset === undefined
+                ? {}
+                : { ZOffsetInSlideCoordinateSystem: zOffset }),
             },
           ],
         }))
@@ -161,7 +165,8 @@ async function writeLevel(
  * stored in the order 4, 1, 5, 0, 2, 3. Give `series` and `opticalPath` to
  * add another channel to an existing series, with a file name `prefix`.
  * `photometric` labels every level; `perFrameMeasures` puts the base
- * PixelMeasures in the per-frame groups only.
+ * PixelMeasures in the per-frame groups only; `zOffset` gives the base
+ * frames a focal plane (the lower levels have no plane position).
  */
 export async function writeSyntheticWsi(
   dcmjs,
@@ -172,6 +177,7 @@ export async function writeSyntheticWsi(
     prefix = "",
     photometric,
     perFrameMeasures,
+    zOffset,
   } = {}
 ) {
   fs.mkdirSync(dir, { recursive: true });
@@ -193,6 +199,7 @@ export async function writeSyntheticWsi(
     opticalPath,
     photometric,
     perFrameMeasures,
+    zOffset,
   });
   const half = await writeLevel(dcmjs, path.join(dir, `${prefix}half.dcm`), {
     width: 300,

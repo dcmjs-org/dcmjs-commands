@@ -10,6 +10,7 @@ import { discoverDicomFiles } from "../io.js";
 import { checkFrameCount, readPart10Frames } from "../pixel/frameReader.js";
 import { FrameSpool, writePart10WithFrames } from "../pixel/frameWriter.js";
 import {
+  decodedFrameBytes,
   hasDecoder,
   imageInfoFromDict,
   isBitstreamTranscode,
@@ -254,7 +255,7 @@ export async function transcodeFile({
           return;
         }
         if (lossy) {
-          frameBytes += nativeFrameBytes(imageInfo);
+          frameBytes += decodedFrameBytes(imageInfo);
         }
         await spool.append(
           copyFrames

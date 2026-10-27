@@ -112,6 +112,31 @@ test("builds TILED_FULL levels whose pixels match the base, from frames out of r
   }
 });
 
+// API: each tile is written from its own pixels, also when the encoder
+// returns the reused tile buffer (explicit-le) and the tile is small.
+test("explicit-le with 64 px tiles gives levels whose pixels match the base", async () => {
+  const wsi = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "small-tiles"));
+  const { code, text } = await wsiresize([wsi.base.path], {
+    directory: path.join(tmpDir, "small-tiles-out"),
+    preset: "jxl-lossless",
+    to: "explicit-le",
+    tile: "64",
+    factor: "2",
+    json: true,
+    quiet: true,
+  });
+  expect(code).toBe(0);
+  const source = await decodeLevel(wsi.base.path);
+  let expected = { data: source.data, width: 600, height: 400, spp: 3 };
+  for (const written of JSON.parse(text).series[0].written) {
+    const level = await decodeLevel(written.path);
+    expect(Buffer.from(level.data).equals(Buffer.from(expected.data))).toBe(
+      true
+    );
+    expected = downsampleBox(expected, 2);
+  }
+});
+
 // User experience: --in-place keeps references to the base level valid.
 test("--in-place keeps the base SOPInstanceUID and series, replaces the old levels, keeps the label", async () => {
   const wsi = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "inplace"));
@@ -206,6 +231,46 @@ test("--in-place rebuilds each optical path of a series, and deletes only that p
   for (const wsi of [a, b]) {
     const base = await readPart10Header({ dcmjs, inputPath: wsi.base.path });
     expect(base.dict["00080018"].Value[0]).toBe(wsi.base.sop);
+  }
+});
+
+// User experience: focal planes are separate pyramids; levels without a
+// plane position belong to the one plane of their optical path.
+test("--in-place keeps focal planes apart, and places levels that have no plane position", async () => {
+  const single = path.join(tmpDir, "one-plane");
+  const one = await writeSyntheticWsi(dcmjs, single, { zOffset: 0 });
+  const opts = {
+    "in-place": true,
+    preset: "jxl-lossless",
+    tile: "256",
+    factor: "4",
+    quiet: true,
+  };
+  expect((await wsiresize([single], opts)).code).toBe(0);
+  // The half level joined the plane at Z 0 and was replaced.
+  expect(fs.existsSync(one.half.path)).toBe(false);
+  expect(fs.readdirSync(single).filter((f) => f.endsWith(".dcm"))).toHaveLength(
+    3
+  );
+
+  const planes = path.join(tmpDir, "two-planes");
+  const a = await writeSyntheticWsi(dcmjs, planes, {
+    zOffset: 0,
+    prefix: "a-",
+  });
+  const b = await writeSyntheticWsi(dcmjs, planes, {
+    series: a.series,
+    zOffset: 5,
+    prefix: "b-",
+  });
+  expect((await wsiresize([planes], opts)).code).toBe(0);
+  for (const wsi of [a, b]) {
+    const base = await readPart10Header({ dcmjs, inputPath: wsi.base.path });
+    expect(base.dict["00080018"].Value[0]).toBe(wsi.base.sop);
+    expect(base.meta["00020010"].Value[0]).toBe("1.2.840.10008.1.2.4.110");
+    // With two planes, a level without a plane position cannot be placed,
+    // so it stays as it is.
+    expect(fs.existsSync(wsi.half.path)).toBe(true);
   }
 });
 

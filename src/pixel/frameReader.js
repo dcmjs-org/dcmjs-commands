@@ -111,10 +111,6 @@ class FrameAssembler {
 class HeaderComplete extends Error {}
 
 /**
- * The `{ meta, dict }` of `inputPath` up to PixelData, without reading the
- * pixel data: the stream is abandoned when PixelData starts.
- */
-/**
  * Throws unless `read` gave NumberOfFrames frames, so a header that splits
  * the pixel data wrongly never produces a rewritten file.
  */
@@ -127,6 +123,10 @@ export function checkFrameCount(read) {
   }
 }
 
+/**
+ * The `{ meta, dict }` of `inputPath` up to PixelData, without reading the
+ * pixel data: the stream is abandoned when PixelData starts.
+ */
 export async function readPart10Header({ dcmjs, inputPath }) {
   const { fromPart10Stream, CollectorListener } = dcmjs.eventStream;
   let depth = 0;

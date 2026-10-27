@@ -90,6 +90,13 @@ export function nativeFrameBytes(imageInfo) {
   );
 }
 
+/**
+ * Bytes in one decoded frame: full-resolution samples, as `decodeFrame`
+ * returns them, also for a YBR_FULL_422 source.
+ */
+export const decodedFrameBytes = (imageInfo) =>
+  nativeFrameBytes({ ...imageInfo, photometric: undefined });
+
 export function hasDecoder(transferSyntaxUID) {
   return (
     transferSyntaxUID === DEFLATED_IMAGE_FRAME ||

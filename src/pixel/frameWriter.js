@@ -21,15 +21,28 @@ export class FrameSpool {
       `.${path.basename(nearPath)}.${crypto.randomBytes(4).toString("hex")}.frames`
     );
     this.out = fs.createWriteStream(this.path);
+    // Kept and thrown from append/close, so that a failed open or write
+    // is a per-file error, not an unhandled 'error' event.
+    this.out.on("error", (err) => {
+      this.error ??= err;
+    });
     this.lengths = [];
     this.bytes = 0;
   }
 
+  /** Appends a copy of `frame`; the caller may reuse its buffer at once. */
   async append(frame) {
+    if (this.error) {
+      throw this.error;
+    }
     this.lengths.push(frame.byteLength);
     this.bytes += frame.byteLength;
-    if (!this.out.write(frame)) {
+    if (!this.out.write(Buffer.from(frame))) {
+      // Rejects when the stream fails while it waits.
       await once(this.out, "drain");
+    }
+    if (this.error) {
+      throw this.error;
     }
   }
 
@@ -37,6 +50,9 @@ export class FrameSpool {
     if (!this.out.closed) {
       this.out.end();
       await once(this.out, "close");
+    }
+    if (this.error) {
+      throw this.error;
     }
   }
 

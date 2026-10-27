@@ -174,7 +174,7 @@ export function parseWsiResizeOptions(values) {
     );
   }
   const quality = parseFloatOption(values, "quality", 0, 100);
-  let distance = parseFloatOption(values, "distance", 0, 25) ?? undefined;
+  let distance = parseFloatOption(values, "distance", 0, 25);
   if (
     distance === undefined &&
     quality !== undefined &&
@@ -204,49 +204,69 @@ function planeKey(dict) {
   const paths = (dict["00480105"]?.Value ?? [])
     .map((item) => first(item, "00480106"))
     .join("\\");
-  const groups = dict["52009229"]?.Value?.[0] ?? dict["52009230"]?.Value?.[0];
-  const position = groups?.["0048021A"]?.Value?.[0];
+  // The shared item usually holds only PixelMeasures, so fall back to the
+  // first frame for the plane position.
+  const position = [dict["52009229"], dict["52009230"]]
+    .map((sq) => sq?.Value?.[0]?.["0048021A"]?.Value?.[0])
+    .find(Boolean);
   const z = position ? first(position, "0040074A") : undefined;
-  return `${paths}|${z ?? ""}`;
+  return { paths, z: z === undefined ? "" : String(z) };
 }
 
 /**
  * Pyramids by SeriesInstanceUID, optical path and focal plane:
- * `{ uid, key, base, levels, others }`.
+ * `{ uid, key, base, levels, shared }`. LABEL and OVERVIEW images are
+ * left out.
  */
 async function findPyramids(dcmjs, positionals) {
   const pyramids = new Map();
   for (const input of positionals) {
     for (const file of discoverDicomFiles(input)) {
       const { meta, dict } = await readPart10Header({ dcmjs, inputPath: file });
-      if (first(dict, "00080016") !== VL_WHOLE_SLIDE) {
+      const imageType = dict["00080008"]?.Value ?? [];
+      if (
+        first(dict, "00080016") !== VL_WHOLE_SLIDE ||
+        !PYRAMID_TYPES.has(imageType[2])
+      ) {
         continue;
       }
       const uid = first(dict, "0020000E");
-      const key = planeKey(dict);
-      const id = `${uid}|${key}`;
+      const { paths, z } = planeKey(dict);
+      const id = `${uid}|${paths}|${z}`;
       if (!pyramids.has(id)) {
-        pyramids.set(id, { uid, key, levels: [], others: [] });
+        pyramids.set(id, { uid, paths, z, key: `${paths}|${z}`, levels: [] });
       }
-      const entry = { path: file, meta, dict };
-      const imageType = dict["00080008"]?.Value ?? [];
-      const group = pyramids.get(id);
-      (PYRAMID_TYPES.has(imageType[2]) ? group.levels : group.others).push(
-        entry
-      );
+      pyramids.get(id).levels.push({ path: file, meta, dict });
+    }
+  }
+  let groups = [...pyramids.values()];
+  // TILED_FULL levels often carry no plane position: they join the one
+  // focal plane of their optical path. With several planes they cannot be
+  // placed, so they are left as they are.
+  for (const loose of groups.filter((g) => g.z === "")) {
+    const planes = groups.filter(
+      (g) => g.uid === loose.uid && g.paths === loose.paths && g.z !== ""
+    );
+    if (planes.length === 1) {
+      planes[0].levels.push(...loose.levels);
+    }
+    if (planes.length) {
+      loose.levels = [];
     }
   }
   const area = ({ dict }) =>
     Number(first(dict, "00480006") ?? 0) * Number(first(dict, "00480007") ?? 0);
-  const groups = [...pyramids.values()];
   for (const group of groups) {
     group.levels.sort((a, b) => area(b) - area(a));
     group.base = group.levels.find(
       (l) => (l.dict["00080008"]?.Value ?? [])[2] === "VOLUME"
     );
+  }
+  groups = groups.filter((g) => g.base);
+  for (const group of groups) {
     group.shared = groups.filter((g) => g.uid === group.uid).length > 1;
   }
-  return groups.filter((g) => g.base);
+  return groups;
 }
 
 function checkPlanes({ dict, path: file }) {
@@ -689,9 +709,19 @@ async function resizeSeries({
       output.written = written;
     }
 
-    // Every level is written; only now replace or delete anything.
-    for (const output of outputs) {
-      fs.renameSync(output.tempPath, output.finalPath);
+    // Every level is written; only now replace or delete anything. The base
+    // goes last, so a failed rename leaves the old pyramid whole.
+    const renamed = [];
+    try {
+      for (const output of [...outputs].reverse()) {
+        fs.renameSync(output.tempPath, output.finalPath);
+        renamed.push(output.finalPath);
+      }
+    } catch (err) {
+      for (const file of renamed) {
+        fs.rmSync(file, { force: true });
+      }
+      throw err;
     }
     if (inPlace) {
       report.deleted = [];

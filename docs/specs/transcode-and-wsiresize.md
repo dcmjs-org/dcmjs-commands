@@ -121,7 +121,10 @@ rules:
 - **PX-I3.** Encoded frames go to a temporary spool file. After the last frame, the writer
   writes the header with `DicomDict.write()`, then the PixelData element, with a Basic Offset
   Table when all offsets fit in 32 bits, then the frames from the spool. Thus the header can
-  hold values that are known only after encoding.
+  hold values that are known only after encoding. `FrameSpool.append` writes a copy of each
+  frame, because an encoder can return a buffer that the caller reuses for the next tile.
+  The spool keeps the first stream error and throws it from `append` and `close`, so a
+  failed open or write is an error of that file, not of the whole run.
 - **PX-I4.** The writer drops elements after PixelData, because they cannot follow new
   pixel data, and reports their tags. The writer drops the Extended Offset Table of the
   source.
@@ -185,10 +188,16 @@ rules:
   one optical path in each image are supported. A concatenation of more than one part is
   refused.
 - **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
-  the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the first plane
-  position. The command refuses a group with two full-size VOLUME images, because then it
+  the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the plane position (from
+  the shared groups, else from the first frame). A level without a plane position joins the
+  one focal plane of its optical path. When the optical path has several focal planes, such
+  a level cannot be placed, and the command leaves it as it is. LABEL and OVERVIEW images are
+  not grouped. The command refuses a group with two full-size VOLUME images, because then it
   cannot tell the pyramids apart. With `-d`, a series that has more than one group gets file
   names `<SOPInstanceUID>.dcm` in place of `level-<n>.dcm`.
+- **WR-I8.** The new files replace the old ones by rename, the base last. If a rename
+  fails, the command removes the new files that it renamed, so the old pyramid stays whole
+  (WR-U7).
 - **WR-I5.** Partial edge tiles are filled with white: 255 for RGB, (255, 128, 128) for
   YBR_FULL. MONOCHROME2 is filled with black (0), and MONOCHROME1 with black (255).
 - **WR-I7.** The spool of out-of-order source frames is removed in the same `finally` as
