@@ -133,6 +133,25 @@ export function parseTranscodeOptions(values) {
   };
 }
 
+const foldCase = process.platform === "win32" || process.platform === "darwin";
+
+/**
+ * A key that two names of one file share: the real path of the nearest
+ * folder that exists (through symlinks, junctions and mapped drives), the
+ * rest of the path, and no case on Windows and macOS. Outputs need not
+ * exist yet.
+ */
+function pathKey(file) {
+  let dir = path.resolve(file);
+  const rest = [];
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) {
+    rest.unshift(path.basename(dir));
+    dir = path.dirname(dir);
+  }
+  const key = path.join(fs.realpathSync.native(dir), ...rest);
+  return foldCase ? key.toLowerCase() : key;
+}
+
 /**
  * [file, root] pairs for every DICOM file under the inputs. A file that two
  * inputs hold is listed once, with the root of the first input.
@@ -143,7 +162,7 @@ function collectInputs(positionals) {
   for (const input of positionals) {
     const root = fs.statSync(input).isDirectory() ? input : path.dirname(input);
     for (const file of discoverDicomFiles(input)) {
-      const resolved = path.resolve(file);
+      const resolved = pathKey(file);
       if (!seen.has(resolved)) {
         seen.add(resolved);
         pairs.push([file, root]);
@@ -200,6 +219,7 @@ export async function transcodeFile({
   let copyFrames = false;
   let skip;
   let lossy = false;
+  let video = false;
   let photometric;
   let frameBytes = 0;
   const spool = dryRun ? null : new FrameSpool(outputPath);
@@ -258,10 +278,14 @@ export async function transcodeFile({
               "use --to jxl-lossless / --to jxl-jpeg"
           );
         }
-        // Skipped files and dry runs only read, so they count no frames.
+        // A video stream is copied as fragments, not frames.
+        video = dcmjs.constants.isVideoTransferSyntax(sourceUid);
+        // Skipped files, dry runs and video copies count no frames.
         progress?.startFile(
           inputPath,
-          skip || dryRun ? 0 : Number(dict["00280008"]?.Value?.[0] ?? 1)
+          skip || dryRun || video
+            ? 0
+            : Number(dict["00280008"]?.Value?.[0] ?? 1)
         );
       },
       onFrame: async (frame) => {
@@ -282,7 +306,9 @@ export async function transcodeFile({
                 options
               )
         );
-        progress?.frame();
+        if (!video) {
+          progress?.frame();
+        }
       },
     });
 
@@ -291,8 +317,12 @@ export async function transcodeFile({
     if (!read.hasPixelData && !rewrite) {
       skip = "no pixel data";
     }
+    // The reader counts video fragments; the report counts frames (TC-U5).
+    const frames = video
+      ? Number(read.dict["00280008"]?.Value?.[0] ?? 1)
+      : read.frames;
     const before = {
-      frames: read.frames,
+      frames,
       pixelBytes: read.pixelBytes,
       fileBytes: read.fileBytes,
     };
@@ -301,13 +331,16 @@ export async function transcodeFile({
       return skip ? { skipped: skip, before } : { before, sourceUid: fileUid };
     }
 
-    // Copied encapsulated frames keep their fragments, which need not be one
-    // per frame (video); decoded and native frames must match NumberOfFrames.
-    if (read.hasPixelData && !(copyFrames && read.encapsulated)) {
+    // A video stream keeps its fragments, which are not one per frame;
+    // every other file must have NumberOfFrames frames.
+    if (read.hasPixelData && !video) {
       checkFrameCount(read);
     }
     const { meta, dict } = read;
     rewrite?.(meta, dict);
+    // The dcmjs writer cannot write a nested encapsulated PixelData, and an
+    // encapsulated icon keeps the old encoding, so it goes (TC-U14).
+    dropEncapsulatedIcon(dict);
     if (fileUid !== sourceUid) {
       // The writer does not deflate the dataset.
       meta["00020010"] = { vr: "UI", Value: [sourceUid] };
@@ -318,7 +351,6 @@ export async function transcodeFile({
     } else if (copyFrames) {
       meta["00020010"] = { vr: "UI", Value: [target.uid] };
     } else {
-      dropEncapsulatedIcon(dict);
       updatePixelHeader({
         meta,
         dict,
@@ -347,7 +379,7 @@ export async function transcodeFile({
       fs.renameSync(tempPath, outputPath);
       return {
         before,
-        after: { frames: read.frames, ...written },
+        after: { frames, ...written },
         dropped: written.dropped,
         sourceUid: fileUid,
       };
@@ -388,12 +420,8 @@ export async function runTranscode({
     stderr(`dcmjs transcode: ${err.message}`);
     return 1;
   }
-  // -d must never replace an input (TC-U2): no output path may be the path
-  // of any input. Windows and macOS file names ignore case.
-  const pathKey =
-    process.platform === "win32" || process.platform === "darwin"
-      ? (file) => path.resolve(file).toLowerCase()
-      : (file) => path.resolve(file);
+  // -d must never replace an input (TC-U15): no output path may be the
+  // path of any input.
   const inputKeys = new Set(inputs.map(([file]) => pathKey(file)));
   const replaced = outDir
     ? inputs.find(([file, root]) =>
@@ -440,14 +468,15 @@ export async function runTranscode({
       : inputPath;
     try {
       // Two inputs with the same relative path would write one file.
-      const earlier = outputs.get(path.resolve(outputPath));
+      const key = pathKey(outputPath);
+      const earlier = outputs.get(key);
       if (earlier) {
         throw new Error(
           `${outputPath} is already the output of ${earlier}; give the ` +
             "inputs separate -d runs"
         );
       }
-      outputs.set(path.resolve(outputPath), inputPath);
+      outputs.set(key, inputPath);
       if (outDir && !dryRun) {
         fs.mkdirSync(path.dirname(outputPath), { recursive: true });
       }

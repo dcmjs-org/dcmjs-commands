@@ -235,7 +235,10 @@ export async function writePart10WithFrames({
   const pixelElementHeader = encapsulated
     ? encapsulatedHeader(
         spool.lengths,
-        Number(header["00280008"]?.Value?.[0] ?? 1)
+        // A video stream has an empty table (PS3.5 8.2.5 to 8.2.8).
+        dcmjs.constants.isVideoTransferSyntax(meta["00020010"]?.Value?.[0])
+          ? 0
+          : Number(header["00280008"]?.Value?.[0] ?? 1)
       )
     : nativeHeader(spool.bytes, bitsAllocated > 8 ? "OW" : "OB");
   const body = encapsulated ? encapsulatedBody(spool) : nativeBody(spool);

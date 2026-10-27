@@ -72,11 +72,15 @@ rules:
   samples. For example, native YBR_FULL_422 written as rle or deflate becomes YBR_FULL, a
   JPEG labelled YBR_FULL that is decoded becomes RGB, and planar colour becomes
   PlanarConfiguration 0.
-- **TC-U14.** A thumbnail (Icon Image Sequence) stays in the output when it is valid in the
-  new transfer syntax, that is, when its pixel data is native. When the pixel data is
-  re-encoded and the thumbnail is encapsulated in the old syntax, the command drops it,
-  because a thumbnail that does not match the syntax is worse than none. This applies to
-  `transcode` and to every level that `wsiresize` writes.
+- **TC-U14.** A thumbnail (Icon Image Sequence) stays in the output when its pixel data is
+  native, because a native thumbnail is valid in any transfer syntax. An encapsulated
+  thumbnail is dropped from every file that the command writes, copies included, because
+  it cannot be written correctly. This applies to `transcode` and to every level that
+  `wsiresize` writes.
+- **TC-U15.** With `-d`, the command refuses the whole run, before any work, when an output
+  path would be the path of any input, so `-d` never replaces an input (TC-U2). Two names of
+  one file count as one path: through symlinks, junctions and mapped drives, and without
+  case on Windows and macOS.
 
 ### `dcmjs wsiresize`
 
@@ -151,13 +155,15 @@ rules:
   callback throws.
 - **PX-I9.** `nativeFrameBytes` throws when Rows, Columns or BitsAllocated is not a positive
   whole number. `transcode` checks this before a decode. Both commands check that the
-  number of frames read equals NumberOfFrames before they write a file. Encapsulated frames
-  that are only copied keep their fragments, which need not be one per frame (video), so
-  they are not checked; native copies are checked, so a short native value fails. The
-  writer writes a Basic Offset Table only when the items are one per frame (NumberOfFrames),
-  else an empty one. `dropEncapsulatedIcon` implements TC-U14: an icon is native when its
-  bytes are exactly Rows x Columns x samples x bytes (plus one pad byte). Little endian
-  native frames do not go through the codec, which would only hand them back.
+  number of frames read equals NumberOfFrames before they write a file. The one exception is
+  a video transfer syntax (`dcmjs.constants.isVideoTransferSyntax`): a video stream is only
+  copied, keeps its fragments, which are not one per frame, and is reported with
+  NumberOfFrames frames. The writer writes a Basic Offset Table only when the items are one
+  per frame and the syntax is not video, else an empty one. `dropEncapsulatedIcon`
+  implements TC-U14: an icon is native when its bytes are exactly one native frame of its
+  own attributes (`nativeFrameBytes`, plus one pad byte). Little endian native frames do not
+  go through the codec, which would only hand them back; a 16-bit frame at an odd offset is
+  copied to an even one first.
 - **PX-I6.** Output files go to a temporary file in the target directory, and a rename puts
   each file in its final location.
 - **PX-I7.** `Progress` (`src/pixel/progress.js`) writes lines, not carriage returns, so the
@@ -186,9 +192,9 @@ rules:
   file of this syntax becomes Explicit VR Little Endian.
 - **TC-I5.** A file that two inputs hold is transcoded once. With `-d`, a file whose output
   path is already the output of another input fails with an error, and the first output
-  stays. A `-d` directory where any output path would be the path of any input is refused
-  before any work, because `-d` must never replace an input (TC-U2). On Windows and macOS
-  the paths are compared without case.
+  stays. The input dedupe, the TC-U15 check and this collision check compare `pathKey`
+  values: the real path of the nearest existing folder (`fs.realpathSync.native`), the rest
+  of the path, and lower case on Windows and macOS.
 
 ### `dcmjs wsiresize`
 

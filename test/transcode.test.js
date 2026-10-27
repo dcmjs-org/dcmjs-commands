@@ -436,9 +436,12 @@ test("--new-series copies a video whose fragments are not one per frame", async 
   const result = await transcode([source], {
     "new-series": true,
     directory: out,
+    json: true,
     quiet: true,
   });
   expect(result.code).toBe(0);
+  // The report counts frames, not the two stream fragments (TC-U5).
+  expect(JSON.parse(result.text).after.frames).toBe(3);
   expect(await frameHashes(path.join(out, "video.dcm"))).toEqual(
     await frameHashes(path.join(source, "video.dcm"))
   );

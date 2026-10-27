@@ -3,7 +3,12 @@
 // Header updates for re-encoded pixel data, shared by `transcode` and
 // `wsiresize`. Datasets are tag-keyed `{ vr, Value }` dicts.
 
-import { hasNativeLayout, isBitstreamTranscode } from "./codec.js";
+import {
+  hasNativeLayout,
+  imageInfoFromDict,
+  isBitstreamTranscode,
+  nativeFrameBytes,
+} from "./codec.js";
 
 /**
  * Image decoders hand these back as RGB; the others come back unchanged.
@@ -106,8 +111,8 @@ export function updatePixelHeader({
  * Drops the Icon Image Sequence (0088,0200) when its PixelData is
  * encapsulated, because that icon keeps the encoding of the old transfer
  * syntax. A native icon is valid under any syntax and stays. The icon is
- * taken as native when its bytes are exactly Rows x Columns x samples
- * (plus one pad byte).
+ * taken as native when its bytes are exactly one native frame of its own
+ * attributes (plus one pad byte).
  */
 export function dropEncapsulatedIcon(dict) {
   const icon = dict["00880200"]?.Value?.[0];
@@ -116,12 +121,13 @@ export function dropEncapsulatedIcon(dict) {
   }
   const parts = icon["7FE00010"]?.Value ?? [];
   const bytes = parts.reduce((n, p) => n + (p?.byteLength ?? 0), 0);
-  const expected =
-    (first(icon, "00280010") ?? 0) *
-    (first(icon, "00280011") ?? 0) *
-    (first(icon, "00280002") ?? 1) *
-    Math.ceil((first(icon, "00280100") ?? 8) / 8);
-  const native = expected > 0 && (bytes === expected || bytes === expected + 1);
+  let expected;
+  try {
+    expected = nativeFrameBytes(imageInfoFromDict(icon));
+  } catch {
+    expected = undefined;
+  }
+  const native = bytes === expected || bytes === expected + 1;
   if (!native) {
     delete dict["00880200"];
   }
