@@ -30,7 +30,10 @@ export class Part10Instance extends InstanceAccess {
   }
 
   async openBulkdata(key, jsonNode, _options) {
-    const buffer = this.entry.bulkdataMap.get(jsonNode?.BulkDataURI);
+    const buffer = await this.dicomAccess.readBulkdata(
+      this.entry.filePath,
+      jsonNode?.BulkDataURI
+    );
     if (!buffer) {
       throw new Error(
         `no bulkdata recorded for tag ${key} ` +

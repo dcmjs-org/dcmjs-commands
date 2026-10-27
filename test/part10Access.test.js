@@ -341,7 +341,15 @@ describe("dcmjs dicomweb command", () => {
       instanceNumber: 1,
     });
     const access = await DicomAccess.createInstance(dir, {});
-    const { skipped } = await access.scan();
+    const { skipped, groups } = await access.scan();
+    // the memoized scan holds no bulkdata bytes (they are re-read on demand)
+    for (const series of groups.values()) {
+      for (const instances of series.values()) {
+        for (const entry of instances.values()) {
+          expect(entry.bulkdataMap).toBeNull();
+        }
+      }
+    }
     expect(skipped).toHaveLength(1);
     expect(skipped[0].file).toMatch(/S3[\\/]COPY$/);
     expect(skipped[0].error).toMatch(/duplicate SOPInstanceUID 2\.25\.101/);
