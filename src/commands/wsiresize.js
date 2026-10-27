@@ -215,8 +215,8 @@ function planeKey(dict) {
 
 /**
  * Pyramids by SeriesInstanceUID, optical path and focal plane:
- * `{ uid, key, base, levels, shared }`. LABEL and OVERVIEW images are
- * left out.
+ * `{ uid, key, base, levels, shared, multiPlane }`. LABEL and OVERVIEW
+ * images are left out.
  */
 async function findPyramids(dcmjs, positionals) {
   const pyramids = new Map();
@@ -264,7 +264,10 @@ async function findPyramids(dcmjs, positionals) {
   }
   groups = groups.filter((g) => g.base);
   for (const group of groups) {
-    group.shared = groups.filter((g) => g.uid === group.uid).length > 1;
+    const series = groups.filter((g) => g.uid === group.uid);
+    group.shared = series.length > 1;
+    group.multiPlane =
+      new Set(series.map((g) => g.z).filter((z) => z !== "")).size > 1;
   }
   return groups;
 }
@@ -386,8 +389,65 @@ const formatDs = (value) => {
   return text.length <= 16 ? text : value.toExponential(9);
 };
 
-/** Per-frame macros that TILED_FULL makes implicit, so they are dropped. */
+/**
+ * Per-frame macros that each level gets new: TILED_FULL implies them, and
+ * a TILED_SPARSE level gets new plane positions (planePositions).
+ */
 const IMPLIED_PER_FRAME = new Set(["0048021A", "00209111"]);
+
+/**
+ * The per-frame groups of a TILED_SPARSE level, for a slide with several
+ * focal planes (WR-I3): one plane position per tile in row-major order,
+ * with the Z offset of the base, and slide X/Y offsets from the origin and
+ * orientation of the base when it has them.
+ */
+function planePositions({ base, shared, plan, tile }) {
+  const source = [base.dict["52009229"], base.dict["52009230"]]
+    .map((sq) => sq?.Value?.[0]?.["0048021A"]?.Value?.[0])
+    .find(Boolean);
+  const origin = base.dict["00480008"]?.Value?.[0];
+  const orientation = base.dict["00480102"]?.Value?.map(Number);
+  const spacing = shared["00289110"]?.Value?.[0]?.["00280030"]?.Value?.map(
+    (v) => Number(v) * plan.scale
+  );
+  const slide =
+    origin && orientation?.length === 6 && spacing
+      ? {
+          x: Number(first(origin, "0040072A")),
+          y: Number(first(origin, "0040073A")),
+        }
+      : undefined;
+  const items = [];
+  for (let ty = 0; ty < plan.tilesY; ty++) {
+    for (let tx = 0; tx < plan.tilesX; tx++) {
+      const col = tx * tile;
+      const row = ty * tile;
+      const position = {
+        "0048021E": { vr: "SL", Value: [col + 1] },
+        "0048021F": { vr: "SL", Value: [row + 1] },
+      };
+      if (source?.["0040074A"]) {
+        position["0040074A"] = structuredClone(source["0040074A"]);
+      }
+      if (slide) {
+        // PixelSpacing is (row spacing, column spacing), in mm.
+        const along = (i) =>
+          orientation[i] * col * spacing[1] +
+          orientation[i + 3] * row * spacing[0];
+        position["0040072A"] = {
+          vr: "DS",
+          Value: [formatDs(slide.x + along(0))],
+        };
+        position["0040073A"] = {
+          vr: "DS",
+          Value: [formatDs(slide.y + along(1))],
+        };
+      }
+      items.push({ "0048021A": { vr: "SQ", Value: [position] } });
+    }
+  }
+  return items;
+}
 
 /**
  * The shared functional groups item of the new levels: the base's shared
@@ -426,6 +486,7 @@ function backgroundFor(photometric) {
 function levelDataset({
   base,
   shared,
+  sparse,
   plan,
   options,
   photometric,
@@ -433,11 +494,21 @@ function levelDataset({
   lossyRatio,
 }) {
   const meta = structuredClone(base.meta);
-  const dict = structuredClone(base.dict);
+  // The per-frame sequence is the largest part of a sparse header, and
+  // each level gets a new one, so it is not cloned.
+  const rest = { ...base.dict };
+  delete rest["52009230"];
+  const dict = structuredClone(rest);
   const { tile, factor, target } = options;
 
-  delete dict["52009230"];
   dict["52009229"] = { vr: "SQ", Value: [structuredClone(shared)] };
+  if (sparse) {
+    delete dict["52009229"].Value[0]["0048021A"];
+    dict["52009230"] = {
+      vr: "SQ",
+      Value: planePositions({ base, shared, plan, tile }),
+    };
+  }
   for (const tag of CONCATENATION_TAGS) {
     delete dict[tag];
   }
@@ -457,7 +528,7 @@ function levelDataset({
     set(dict, "00080019", "UI", uids.pyramid);
   }
   set(dict, "00200013", "IS", uids.instance);
-  set(dict, "00209311", "CS", "TILED_FULL");
+  set(dict, "00209311", "CS", sparse ? "TILED_SPARSE" : "TILED_FULL");
   set(dict, "00280008", "IS", plan.frames);
   set(dict, "00280010", "US", tile);
   set(dict, "00280011", "US", tile);
@@ -522,6 +593,11 @@ async function resizeSeries({
   checkBase(base);
   checkPyramid(group);
   const shared = sharedGroups(base);
+  // Before any file exists, so an off-grid tile leaves nothing behind.
+  const frameCount = Number(first(base.dict, "00280008") ?? 1);
+  const position = tilePosition(base.dict);
+  const order = rasterOrder(position, frameCount);
+  const others = group.levels.filter((l) => l !== base);
   const { tile, factor, target, encode } = options;
   const width = Number(first(base.dict, "00480006"));
   const height = Number(first(base.dict, "00480007"));
@@ -556,7 +632,6 @@ async function resizeSeries({
   if (dryRun) {
     return report;
   }
-  const frameCount = Number(first(base.dict, "00280008") ?? 1);
   progress?.startFile(base.path, frameCount, {
     tiles: levels.reduce((sum, l) => sum + l.frames, 0),
   });
@@ -631,8 +706,6 @@ async function resizeSeries({
     background,
     onStrip: (strip) => builder.addRows(strip),
   });
-  const position = tilePosition(base.dict);
-  const order = rasterOrder(position, frameCount);
   const addFrame = async (frame, i) => {
     const pixels = await decodeFrame(frame, sourceInfo, sourceUid);
     const { x, y } = position(i);
@@ -676,7 +749,7 @@ async function resizeSeries({
     await assembler.finish();
     await builder.finish();
     addTotals(before, read);
-    for (const level of group.levels.slice(1)) {
+    for (const level of others) {
       addTotals(before, await measure(dcmjs, level.path));
     }
 
@@ -684,6 +757,7 @@ async function resizeSeries({
       const { meta, dict } = levelDataset({
         base,
         shared,
+        sparse: group.multiPlane,
         plan: output.plan,
         options,
         photometric,
@@ -725,7 +799,7 @@ async function resizeSeries({
     }
     if (inPlace) {
       report.deleted = [];
-      for (const level of group.levels.slice(1)) {
+      for (const level of others) {
         fs.rmSync(level.path);
         report.deleted.push(level.path);
       }

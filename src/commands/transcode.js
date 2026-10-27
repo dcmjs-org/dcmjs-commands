@@ -196,6 +196,7 @@ export async function transcodeFile({
   let copyFrames = false;
   let skip;
   let lossy = false;
+  let photometric;
   let frameBytes = 0;
   const spool = dryRun ? null : new FrameSpool(outputPath);
 
@@ -237,6 +238,14 @@ export async function transcodeFile({
         ) {
           // Decoding needs the frame size; this throws when it is missing.
           nativeFrameBytes(imageInfo);
+        }
+        if (!skip && !copyFrames) {
+          // Throws for a colour model the target refuses, before any encode.
+          photometric = photometricAfter({
+            photometric: dict["00280004"]?.Value?.[0],
+            sourceUid,
+            target,
+          });
         }
         if (!skip && lossy && !allowLossy) {
           throw new Error(
@@ -307,11 +316,7 @@ export async function transcodeFile({
         dict,
         sourceUid,
         target,
-        photometric: photometricAfter({
-          photometric: dict["00280004"]?.Value?.[0],
-          sourceUid,
-          target,
-        }),
+        photometric,
         lossyRatio: lossy ? frameBytes / Math.max(1, spool.bytes) : undefined,
       });
     }

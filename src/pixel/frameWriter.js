@@ -12,6 +12,8 @@ import { pipeline } from "node:stream/promises";
 
 const PIXEL_DATA = "7FE00010";
 const MAX_BOT_OFFSET = 0xffffffff;
+/** Extended Offset Table and its lengths (7FE0,0001/0002). */
+const OFFSET_TABLE_TAGS = new Set(["7FE00001", "7FE00002"]);
 
 /** An append-only temp file of frames, next to `nearPath`. */
 export class FrameSpool {
@@ -194,6 +196,10 @@ export async function writePart10WithFrames({
       if (tag !== PIXEL_DATA) {
         dropped.push(tag);
       }
+      continue;
+    }
+    // The source offset tables do not describe the new fragments.
+    if (OFFSET_TABLE_TAGS.has(tag)) {
       continue;
     }
     header[tag] = element;

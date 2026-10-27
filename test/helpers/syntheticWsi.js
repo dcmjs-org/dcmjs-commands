@@ -58,6 +58,7 @@ async function writeLevel(
     photometric = "YBR_FULL_422",
     perFrameMeasures,
     zOffset,
+    extendedOffsetTable,
   }
 ) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
@@ -138,12 +139,24 @@ async function writeLevel(
   }
 
   const dict = DicomMetaDictionary.denaturalizeDataset(dataset);
-  dict["7FE00010"] = {
-    vr: "OB",
-    Value: await Promise.all(
-      frames.map(({ x, y }) => encodeTile(x, y, tile, scale))
-    ),
-  };
+  const encoded = await Promise.all(
+    frames.map(({ x, y }) => encodeTile(x, y, tile, scale))
+  );
+  dict["7FE00010"] = { vr: "OB", Value: encoded };
+  if (extendedOffsetTable) {
+    // Item offsets from the first frame item: 8 header bytes plus the
+    // even-padded fragment of each frame before it.
+    const offsets = new BigUint64Array(encoded.length);
+    const lengths = new BigUint64Array(encoded.length);
+    let offset = 0;
+    encoded.forEach((frame, i) => {
+      offsets[i] = BigInt(offset);
+      lengths[i] = BigInt(frame.byteLength);
+      offset += 8 + frame.byteLength + (frame.byteLength % 2);
+    });
+    dict["7FE00001"] = { vr: "OV", Value: [offsets.buffer] };
+    dict["7FE00002"] = { vr: "OV", Value: [lengths.buffer] };
+  }
   const meta = DicomMetaDictionary.denaturalizeDataset({
     FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
     MediaStorageSOPClassUID: VL_WHOLE_SLIDE,
@@ -166,7 +179,8 @@ async function writeLevel(
  * add another channel to an existing series, with a file name `prefix`.
  * `photometric` labels every level; `perFrameMeasures` puts the base
  * PixelMeasures in the per-frame groups only; `zOffset` gives the base
- * frames a focal plane (the lower levels have no plane position).
+ * frames a focal plane (the lower levels have no plane position);
+ * `extendedOffsetTable` gives the base an Extended Offset Table.
  */
 export async function writeSyntheticWsi(
   dcmjs,
@@ -178,6 +192,7 @@ export async function writeSyntheticWsi(
     photometric,
     perFrameMeasures,
     zOffset,
+    extendedOffsetTable,
   } = {}
 ) {
   fs.mkdirSync(dir, { recursive: true });
@@ -200,6 +215,7 @@ export async function writeSyntheticWsi(
     photometric,
     perFrameMeasures,
     zOffset,
+    extendedOffsetTable,
   });
   const half = await writeLevel(dcmjs, path.join(dir, `${prefix}half.dcm`), {
     width: 300,

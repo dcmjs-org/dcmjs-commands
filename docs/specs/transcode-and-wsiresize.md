@@ -96,7 +96,8 @@ rules:
   command rebuilds each one, and never deletes an image of a different optical path or
   focal plane. With `-d`, the pyramids of one source series go to one new series, keep one
   shared PyramidUID (a new UID for each source PyramidUID), and have InstanceNumber values
-  that do not repeat in the series.
+  that do not repeat in the series. The rebuilt levels keep their focal plane, so the
+  command can run again on its own output and still tell the planes apart.
 - **WR-U5.** The command prints the size of the total pixel matrix, the levels before and
   after, and the same totals as TC-U5.
 - **WR-U6.** The pixels of the new base level come from the source base level, at the same
@@ -126,8 +127,9 @@ rules:
   The spool keeps the first stream error and throws it from `append` and `close`, so a
   failed open or write is an error of that file, not of the whole run.
 - **PX-I4.** The writer drops elements after PixelData, because they cannot follow new
-  pixel data, and reports their tags. The writer drops the Extended Offset Table of the
-  source.
+  pixel data, and reports their tags. The writer drops the Extended Offset Table and its
+  lengths (7FE0,0001/0002) of the source, whatever the caller passes, because they do not
+  describe the new fragments.
 - **PX-I5.** The image codecs come from the published `@cornerstonejs/dicom-codec` (1.2.0 or
   later, which includes `@cornerstonejs/codec-libjxl`). The command loads the codecs on
   first use. JPEG Baseline to and from JPEG XL JPEG Recompression goes through the
@@ -184,6 +186,12 @@ rules:
   is the same in every frame (for example PixelMeasures) moves to the shared groups. The
   plane position and the frame content are dropped, because TILED_FULL implies them. A
   per-frame macro that differs between frames is refused before the decode starts.
+  Exception: when a series has several focal planes, the new levels keep the source tile
+  layout, `TILED_SPARSE`, because PS3.3 gives TILED_FULL no per-frame plane position for the
+  Z offset. Each tile then gets a PlanePositionSlideSequence item, in row-major order, with
+  its column and row position, the Z offset of the base, and slide X/Y offsets from the
+  TotalPixelMatrixOriginSequence, ImageOrientationSlide and PixelSpacing when the base has
+  them.
 - **WR-I4.** Only 8-bit samples, one or three samples per pixel, and one focal plane and
   one optical path in each image are supported. A concatenation of more than one part is
   refused.
@@ -201,7 +209,10 @@ rules:
 - **WR-I5.** Partial edge tiles are filled with white: 255 for RGB, (255, 128, 128) for
   YBR_FULL. MONOCHROME2 is filled with black (0), and MONOCHROME1 with black (255).
 - **WR-I7.** The spool of out-of-order source frames is removed in the same `finally` as
-  the output spools, so a failed read leaves no temporary file.
+  the output spools, so a failed read leaves no temporary file. The tile positions are
+  checked before any spool or directory exists. `transcode` computes the output
+  PhotometricInterpretation in `onHeader`, so a refused colour model fails before the first
+  frame is encoded.
 
 ## Measured results
 

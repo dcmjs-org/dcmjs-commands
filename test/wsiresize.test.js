@@ -75,7 +75,9 @@ async function decodeLevel(file) {
 
 // API: geometry, header, and pixels of every level.
 test("builds TILED_FULL levels whose pixels match the base, from frames out of raster order", async () => {
-  const wsi = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "geometry"));
+  const wsi = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "geometry"), {
+    extendedOffsetTable: true,
+  });
   const outDir = path.join(tmpDir, "geometry-out");
   const { code, text } = await wsiresize([path.dirname(wsi.base.path)], {
     directory: outDir,
@@ -105,6 +107,8 @@ test("builds TILED_FULL levels whose pixels match the base, from frames out of r
     );
     expect(level.dict["00209311"].Value[0]).toBe("TILED_FULL");
     expect(level.dict["52009230"]).toBeUndefined();
+    // The base's Extended Offset Table does not describe the new frames.
+    expect(level.dict["7FE00001"]).toBeUndefined();
     const spacing =
       level.dict["52009229"].Value[0]["00289110"].Value[0]["00280030"].Value;
     expect(Number(spacing[0])).toBeCloseTo(0.0005 * 2 ** written.level, 10);
@@ -263,7 +267,13 @@ test("--in-place keeps focal planes apart, and places levels that have no plane 
     zOffset: 5,
     prefix: "b-",
   });
+  const sourceA = await decodeLevel(a.base.path);
   expect((await wsiresize([planes], opts)).code).toBe(0);
+  // The sparse base is placed by its new plane positions, pixel for pixel.
+  const rebuiltA = await decodeLevel(a.base.path);
+  expect(Buffer.from(rebuiltA.data).equals(Buffer.from(sourceA.data))).toBe(
+    true
+  );
   for (const wsi of [a, b]) {
     const base = await readPart10Header({ dcmjs, inputPath: wsi.base.path });
     expect(base.dict["00080018"].Value[0]).toBe(wsi.base.sop);
@@ -271,7 +281,13 @@ test("--in-place keeps focal planes apart, and places levels that have no plane 
     // With two planes, a level without a plane position cannot be placed,
     // so it stays as it is.
     expect(fs.existsSync(wsi.half.path)).toBe(true);
+    // Several focal planes keep the sparse layout, and with it the Z offset.
+    expect(base.dict["00209311"].Value[0]).toBe("TILED_SPARSE");
+    const position = base.dict["52009230"].Value[0]["0048021A"].Value[0];
+    expect(Number(position["0040074A"].Value[0])).toBe(wsi === a ? 0 : 5);
   }
+  // So a second run still tells the planes apart.
+  expect((await wsiresize([planes], opts)).code).toBe(0);
 });
 
 // API: a TILED_FULL level keeps the per-frame macros that are the same for all frames.
