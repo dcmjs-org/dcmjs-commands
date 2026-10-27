@@ -29,6 +29,23 @@ afterAll(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test("anonymize --dry-run does not list unchanged binary elements", async () => {
+  const out = capture();
+  const code = await runAnonymize({
+    dcmjs,
+    positionals: [FIXTURE],
+    values: { "dry-run": true },
+    stdout: out.write,
+    stderr: () => {},
+  });
+  expect(code).toBe(0);
+  const { changes } = JSON.parse(out.lines.join("\n"));
+  const tags = changes.map((c) => c.tag);
+  for (const tag of ["7FE00010", "20011003", "2001100A"]) {
+    expect(tags).not.toContain(tag);
+  }
+});
+
 test("anonymize writes a scrubbed copy", async () => {
   const out = capture();
   const err = capture();

@@ -75,7 +75,8 @@ export async function runAnonymize({
       // Snapshot summaries before cleaning; the clean mutates in place.
       const before = {};
       for (const tag of Object.keys(dicomDict.dict)) {
-        before[tag] = { Value: dicomDict.dict[tag].Value };
+        const { vr, Value } = dicomDict.dict[tag];
+        before[tag] = { vr, Value };
       }
       dcmjs.anonymizer.cleanTags(dicomDict.dict);
       const changes = diffDicts(before, dicomDict.dict);
