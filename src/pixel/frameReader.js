@@ -114,6 +114,19 @@ class HeaderComplete extends Error {}
  * The `{ meta, dict }` of `inputPath` up to PixelData, without reading the
  * pixel data: the stream is abandoned when PixelData starts.
  */
+/**
+ * Throws unless `read` gave NumberOfFrames frames, so a header that splits
+ * the pixel data wrongly never produces a rewritten file.
+ */
+export function checkFrameCount(read) {
+  const expected = Number(read.dict["00280008"]?.Value?.[0] ?? 1);
+  if (read.frames !== expected) {
+    throw new Error(
+      `PixelData holds ${read.frames} frames, NumberOfFrames is ${expected}`
+    );
+  }
+}
+
 export async function readPart10Header({ dcmjs, inputPath }) {
   const { fromPart10Stream, CollectorListener } = dcmjs.eventStream;
   let depth = 0;
@@ -227,7 +240,13 @@ export async function readPart10Frames({
           markerFramed: MARKER_FRAMED.test(transferSyntaxUID ?? ""),
         });
       } else {
-        nativeFrameSize = nativeFrameBytes(imageInfoFromDict(dict));
+        // Without a frame size the whole value is one frame; callers that
+        // decode check the dimensions and the frame count themselves.
+        try {
+          nativeFrameSize = nativeFrameBytes(imageInfoFromDict(dict));
+        } catch {
+          nativeFrameSize = 0;
+        }
       }
       return undefined;
     },
@@ -280,12 +299,18 @@ export async function readPart10Frames({
       } else {
         const all = concat(nativeParts);
         nativeParts.length = 0;
-        for (
-          let o = 0;
-          o + nativeFrameSize <= all.byteLength;
-          o += nativeFrameSize
-        ) {
-          await onFrame(all.subarray(o, o + nativeFrameSize), frameIndex++);
+        if (!nativeFrameSize) {
+          if (all.byteLength) {
+            await onFrame(all, frameIndex++);
+          }
+        } else {
+          for (
+            let o = 0;
+            o + nativeFrameSize <= all.byteLength;
+            o += nativeFrameSize
+          ) {
+            await onFrame(all.subarray(o, o + nativeFrameSize), frameIndex++);
+          }
         }
       }
     }

@@ -116,13 +116,17 @@ test("builds TILED_FULL levels whose pixels match the base, from frames out of r
 test("--in-place keeps the base SOPInstanceUID and series, replaces the old levels, keeps the label", async () => {
   const wsi = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "inplace"));
   const dir = path.dirname(wsi.base.path);
-  const { code } = await wsiresize([dir], {
+  const { code, err } = await wsiresize([dir], {
     "in-place": true,
     preset: "jxl-medium",
     tile: "256",
     factor: "4",
+    quiet: true,
   });
   expect(code).toBe(0);
+  expect(err).toMatch(
+    /warning: JPEG XL is lossy.*keeps the base SOPInstanceUID/
+  );
 
   const base = await readPart10Header({ dcmjs, inputPath: wsi.base.path });
   expect(base.dict["00080018"].Value[0]).toBe(wsi.base.sop);
@@ -132,6 +136,48 @@ test("--in-place keeps the base SOPInstanceUID and series, replaces the old leve
   expect(fs.existsSync(wsi.label.path)).toBe(true);
   // 600x400 at 256px, factor 4: the base and one 150x100 level.
   expect(fs.readdirSync(dir).filter((f) => f.endsWith(".dcm"))).toHaveLength(3);
+});
+
+// User experience: --in-place never deletes another channel of the slide.
+test("--in-place rebuilds each optical path of a series, and deletes only that path's old levels", async () => {
+  const dir = path.join(tmpDir, "channels");
+  const a = await writeSyntheticWsi(dcmjs, dir, {
+    opticalPath: "1",
+    prefix: "a-",
+  });
+  const b = await writeSyntheticWsi(dcmjs, dir, {
+    series: a.series,
+    opticalPath: "2",
+    prefix: "b-",
+  });
+  const { code } = await wsiresize([dir], {
+    "in-place": true,
+    preset: "jxl-lossless",
+    tile: "256",
+    factor: "4",
+    quiet: true,
+  });
+  expect(code).toBe(0);
+
+  const paths = {};
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".dcm"))) {
+    const { dict } = await readPart10Header({
+      dcmjs,
+      inputPath: path.join(dir, file),
+    });
+    const id = dict["00480105"].Value[0]["00480106"].Value[0];
+    const type = dict["00080008"].Value[2];
+    paths[id] ??= [];
+    paths[id].push(`${type} ${dict["00480006"].Value[0]}`);
+  }
+  // Each path: its base, one new 150x100 level, and its label.
+  for (const id of ["1", "2"]) {
+    expect(paths[id].sort()).toEqual(["LABEL 128", "VOLUME 150", "VOLUME 600"]);
+  }
+  for (const wsi of [a, b]) {
+    const base = await readPart10Header({ dcmjs, inputPath: wsi.base.path });
+    expect(base.dict["00080018"].Value[0]).toBe(wsi.base.sop);
+  }
 });
 
 test("needs -d or --in-place", async () => {

@@ -31,12 +31,12 @@ What you can do with them:
 
 Four bins ship with the package:
 
-| Bin          | Purpose                                                                                                                                              |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bin          | Purpose                                                                                                                                                                    |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb, transcode, wsiresize — plus patient-access (SMART Imaging Access retrieval) |
-| `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                               |
-| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                   |
-| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                            |
+| `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                                                     |
+| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                                         |
+| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                                                  |
 
 For a worked tour of every command with runnable examples, see
 [EXAMPLES.md](EXAMPLES.md). For where the tooling is headed (library-level
@@ -224,7 +224,10 @@ frame at a time, so file size does not matter. Files are replaced in place
 unless `-d` names an output directory. JPEG Baseline whole-slide images
 recompress losslessly to JPEG XL (`jxl-jpeg`, 1.2.840.10008.1.2.4.111),
 and `--to jpeg` gives back the same JPEG bytes. Lossy targets need
-`--lossy` and get a new SOPInstanceUID. The command prints instances,
+`--lossy` and get a new SOPInstanceUID. `rle` and `deflate` are lossless,
+and are the targets for BINARY segmentations (Bits Allocated 1). The
+written PhotometricInterpretation always matches the written samples:
+native YBR_FULL_422 written as rle or deflate becomes YBR_FULL. The command prints instances,
 frames, header bytes and image bytes before and after. Progress goes to
 stderr: a line per large file and its frames, batches for small files;
 `-q` turns it off.
@@ -254,7 +257,9 @@ level factor and codec. Presets: `jxl-high` (default, JPEG XL distance 1),
 progressive — and `jpeg-512`. `-d` writes a new series; `--in-place` keeps
 the base level's SOPInstanceUID and the SeriesInstanceUID, so references to
 the base level (for example bulk annotations) stay valid, and deletes the
-old lower levels.
+old lower levels. Each optical path and focal plane is its own pyramid, so
+other channels are never deleted. With a lossy preset, `--in-place` still
+keeps the base SOPInstanceUID and prints a warning.
 
 ```bash
 dcmjs wsiresize ./slide --dry-run                   # print the planned levels

@@ -58,6 +58,17 @@ rules:
     one for each copy of a copy, so the user can see which iteration an upload came from.
   - The instance creation, series and content date and time get the time of the run.
   - The pixel data does not change, unless `--to` asks for a different transfer syntax.
+- **TC-U11.** The user can write RLE Lossless (`rle`, `1.2.840.10008.1.2.5`) and Deflated
+  Image Frame Compression (`deflate`, `1.2.840.10008.1.2.8.1`). Both are lossless.
+- **TC-U12.** The user can convert a BINARY segmentation (Bits Allocated 1) to and from
+  explicit-le, rle and deflate, and every bit stays the same (PS3.5 CP-2301, Sup 244). The
+  command refuses other targets for Bits Allocated 1.
+- **TC-U13.** The PhotometricInterpretation and the PlanarConfiguration of each written
+  file describe the samples that the file holds. A format that holds its own colour space
+  (JPEG, JPEG XL) can keep the value of the source when the bitstream does not change. A
+  format that holds plain samples (explicit-le, rle, deflate) gets the value of the written
+  samples. For example, native YBR_FULL_422 written as rle or deflate becomes YBR_FULL, and
+  planar colour becomes PlanarConfiguration 0.
 
 ### `dcmjs wsiresize`
 
@@ -74,6 +85,13 @@ rules:
   2D coordinates of a bulk annotation stay valid, because the total pixel matrix of the base
   level does not change. The command deletes the old pyramid levels other than the base,
   and does not change LABEL and OVERVIEW images.
+- **WR-U4a.** With `--in-place` and a lossy transfer syntax, the base level also keeps its
+  SOPInstanceUID. This is different from TC-U4, and it is intentional. The command prints a
+  warning on stderr, because a system that already holds that instance can keep the old
+  pixels.
+- **WR-U4b.** Each optical path and each focal plane of a series is a separate pyramid. The
+  command rebuilds each one, and never deletes an image of a different optical path or
+  focal plane. With `-d`, the pyramids of one source series go to one new series.
 - **WR-U5.** The command prints the size of the total pixel matrix, the levels before and
   after, and the same totals as TC-U5.
 - **WR-U6.** The pixels of the new base level come from the source base level, at the same
@@ -99,9 +117,18 @@ rules:
 - **PX-I4.** The writer drops elements after PixelData, because they cannot follow new
   pixel data, and reports their tags. The writer drops the Extended Offset Table of the
   source.
-- **PX-I5.** All codecs come from `@cornerstonejs/dicom-codec`. The command loads the codecs
-  on first use. JPEG Baseline to and from JPEG XL JPEG Recompression goes through the
-  bitstream path of the codec, with no pixel decode.
+- **PX-I5.** The image codecs come from the published `@cornerstonejs/dicom-codec` (1.2.0 or
+  later, which includes `@cornerstonejs/codec-libjxl`). The command loads the codecs on
+  first use. JPEG Baseline to and from JPEG XL JPEG Recompression goes through the
+  bitstream path of the codec, with no pixel decode. The codec package only decodes RLE, so
+  `src/pixel/rle.js` encodes RLE. `node:zlib` encodes and decodes deflate.
+- **PX-I8.** `decodeFrame` always returns interleaved samples. It interleaves planar native
+  and deflate frames, asks the RLE decoder for interleaved output, and upsamples native
+  YBR_FULL_422 (2 bytes for each pixel) to YBR_FULL. `photometricAfter` gives the matching
+  PhotometricInterpretation.
+- **PX-I9.** `nativeFrameBytes` throws when Rows, Columns or BitsAllocated is not a positive
+  whole number. `transcode` checks this before a decode. Both commands check that the
+  number of frames read equals NumberOfFrames before they write a file.
 - **PX-I6.** Output files go to a temporary file in the target directory, and a rename puts
   each file in its final location.
 - **PX-I7.** `Progress` (`src/pixel/progress.js`) writes lines, not carriage returns, so the
@@ -134,8 +161,14 @@ rules:
 - **WR-I3.** Each new level is `TILED_FULL`, has no PerFrameFunctionalGroupsSequence and no
   concatenation attributes, has ImageType `DERIVED\PRIMARY\VOLUME\(NONE|RESAMPLED)`, and has
   its PixelSpacing multiplied by the scale of the level.
-- **WR-I4.** Only 8-bit samples, one or three samples per pixel, one focal plane and one
-  optical path are supported. A concatenation of more than one part is refused.
+- **WR-I4.** Only 8-bit samples, one or three samples per pixel, and one focal plane and
+  one optical path in each image are supported. A concatenation of more than one part is
+  refused.
+- **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
+  the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the first plane
+  position. The command refuses a group with two full-size VOLUME images, because then it
+  cannot tell the pyramids apart. With `-d`, a series that has more than one group gets file
+  names `<SOPInstanceUID>.dcm` in place of `level-<n>.dcm`.
 - **WR-I5.** Partial edge tiles are filled with white (255), or with black (0) for
   MONOCHROME2.
 
@@ -179,12 +212,12 @@ The source is a JPEG Baseline pyramid of 7 levels:
 - 2,111 frames in total;
 - 29.4 MB.
 
-| Command | Time | Image bytes | Change |
-| --- | --- | --- | --- |
-| `transcode --to jxl-jpeg` (in place, lossless) | 6.6 s | 28,981,978 → 21,401,476 | -26.2% |
-| `transcode --to jpeg` from the `.111` copy | — | 21,402,552 → 28,981,978 | the same JPEG bytes |
-| `wsiresize -p jxl-high` (7 → 4 levels) | 275 s | 28,981,978 → 26,143,543 | -9.8% |
-| `wsiresize -p jxl-medium --in-place` | 294 s | 28,981,978 → 18,326,602 | -36.8% |
+| Command                                        | Time  | Image bytes             | Change              |
+| ---------------------------------------------- | ----- | ----------------------- | ------------------- |
+| `transcode --to jxl-jpeg` (in place, lossless) | 6.6 s | 28,981,978 → 21,401,476 | -26.2%              |
+| `transcode --to jpeg` from the `.111` copy     | —     | 21,402,552 → 28,981,978 | the same JPEG bytes |
+| `wsiresize -p jxl-high` (7 → 4 levels)         | 275 s | 28,981,978 → 26,143,543 | -9.8%               |
+| `wsiresize -p jxl-medium --in-place`           | 294 s | 28,981,978 → 18,326,602 | -36.8%              |
 
 The peak memory of the `jxl-high` run on the small pyramid was 584 MB. The memory of
 `wsiresize` increases with the width of the slide. The command keeps one band of 1024

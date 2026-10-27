@@ -3,9 +3,12 @@
 // Header updates for re-encoded pixel data, shared by `transcode` and
 // `wsiresize`. Datasets are tag-keyed `{ vr, Value }` dicts.
 
-import { isBitstreamTranscode } from "./codec.js";
+import { hasNativeLayout, isBitstreamTranscode } from "./codec.js";
 
-/** Decoders hand these back as RGB; the others come back unchanged. */
+/**
+ * Image decoders hand these back as RGB; the others come back unchanged.
+ * Native YBR_FULL_422 is upsampled to YBR_FULL instead (see decodeFrame).
+ */
 const DECODED_AS_RGB = new Set([
   "YBR_FULL_422",
   "YBR_PARTIAL_420",
@@ -26,7 +29,13 @@ export function photometricAfter({ photometric, sourceUid, target }) {
   if (isBitstreamTranscode(sourceUid, target.uid)) {
     return photometric;
   }
-  const decoded = DECODED_AS_RGB.has(photometric) ? "RGB" : photometric;
+  const decoded = hasNativeLayout(sourceUid)
+    ? photometric === "YBR_FULL_422"
+      ? "YBR_FULL"
+      : photometric
+    : DECODED_AS_RGB.has(photometric)
+      ? "RGB"
+      : photometric;
   if (target.uid === "1.2.840.10008.1.2.4.50" && decoded === "RGB") {
     return "YBR_FULL_422";
   }
@@ -37,7 +46,7 @@ export function photometricAfter({ photometric, sourceUid, target }) {
   ) {
     throw new Error(
       `PhotometricInterpretation ${photometric} cannot be written as ` +
-        `${target.name}; transcode to explicit-le or jxl-lossless instead`
+        `${target.name}; transcode to explicit-le, rle or deflate instead`
     );
   }
   return decoded;

@@ -46,7 +46,7 @@ async function encodeTile(x0, y0, tile, scale) {
 async function writeLevel(
   dcmjs,
   file,
-  { width, height, tile, scale, imageType, series, order }
+  { width, height, tile, scale, imageType, series, order, opticalPath }
 ) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
   const tilesX = Math.ceil(width / tile);
@@ -110,6 +110,9 @@ async function writeLevel(
   if (!order) {
     delete dataset.PerFrameFunctionalGroupsSequence;
   }
+  if (opticalPath) {
+    dataset.OpticalPathSequence = [{ OpticalPathIdentifier: opticalPath }];
+  }
 
   const dict = DicomMetaDictionary.denaturalizeDataset(dataset);
   dict["7FE00010"] = {
@@ -136,13 +139,22 @@ async function writeLevel(
 
 /**
  * Writes the pyramid into `dir`. The base is 600 x 400 in 256 px tiles,
- * stored in the order 4, 1, 5, 0, 2, 3.
+ * stored in the order 4, 1, 5, 0, 2, 3. Give `series` and `opticalPath` to
+ * add another channel to an existing series, with a file name `prefix`.
  */
-export async function writeSyntheticWsi(dcmjs, dir) {
+export async function writeSyntheticWsi(
+  dcmjs,
+  dir,
+  { series: given, opticalPath, prefix = "" } = {}
+) {
   fs.mkdirSync(dir, { recursive: true });
   const { uid } = dcmjs.data.DicomMetaDictionary;
-  const series = { study: uid(), uid: uid(), frameOfReference: uid() };
-  const base = await writeLevel(dcmjs, path.join(dir, "base.dcm"), {
+  const series = given ?? {
+    study: uid(),
+    uid: uid(),
+    frameOfReference: uid(),
+  };
+  const base = await writeLevel(dcmjs, path.join(dir, `${prefix}base.dcm`), {
     width: 600,
     height: 400,
     tile: 256,
@@ -150,22 +162,25 @@ export async function writeSyntheticWsi(dcmjs, dir) {
     imageType: "VOLUME",
     series,
     order: [4, 1, 5, 0, 2, 3],
+    opticalPath,
   });
-  const half = await writeLevel(dcmjs, path.join(dir, "half.dcm"), {
+  const half = await writeLevel(dcmjs, path.join(dir, `${prefix}half.dcm`), {
     width: 300,
     height: 200,
     tile: 256,
     scale: 2,
     imageType: "VOLUME",
     series,
+    opticalPath,
   });
-  const label = await writeLevel(dcmjs, path.join(dir, "label.dcm"), {
+  const label = await writeLevel(dcmjs, path.join(dir, `${prefix}label.dcm`), {
     width: 128,
     height: 128,
     tile: 128,
     scale: 1,
     imageType: "LABEL",
     series,
+    opticalPath,
   });
   return { series, base, half, label };
 }

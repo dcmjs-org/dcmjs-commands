@@ -182,30 +182,18 @@ test("--new-series needs -d", async () => {
   expect(err).toMatch(/--new-series needs -d <dir>/);
 });
 
-/** A native 1-bit BINARY SEG of three 16x16 frames. */
-function writeBinarySeg(file) {
+/** A native Explicit VR Little Endian image with `attributes` and `pixels`. */
+function writeNative(file, attributes, pixels) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
   const sop = DicomMetaDictionary.uid();
-  const pixels = crypto.randomBytes(3 * 32);
-  pixels.fill(0, 0, 16); // long runs as well as noise
   const dict = DicomMetaDictionary.denaturalizeDataset({
-    SOPClassUID: "1.2.840.10008.5.1.4.1.1.66.4",
     SOPInstanceUID: sop,
-    Modality: "SEG",
-    SegmentationType: "BINARY",
-    SamplesPerPixel: 1,
-    PhotometricInterpretation: "MONOCHROME2",
-    NumberOfFrames: 3,
-    Rows: 16,
-    Columns: 16,
-    BitsAllocated: 1,
-    BitsStored: 1,
-    HighBit: 0,
     PixelRepresentation: 0,
+    ...attributes,
   });
   const meta = DicomMetaDictionary.denaturalizeDataset({
     FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
-    MediaStorageSOPClassUID: "1.2.840.10008.5.1.4.1.1.66.4",
+    MediaStorageSOPClassUID: attributes.SOPClassUID,
     MediaStorageSOPInstanceUID: sop,
     TransferSyntaxUID: "1.2.840.10008.1.2.1",
   });
@@ -219,6 +207,135 @@ function writeBinarySeg(file) {
   part10.dict = dict;
   fs.writeFileSync(file, Buffer.from(part10.write()));
 }
+
+/** A native 1-bit BINARY SEG of three 16x16 frames. */
+function writeBinarySeg(file) {
+  const pixels = crypto.randomBytes(3 * 32);
+  pixels.fill(0, 0, 16); // long runs as well as noise
+  writeNative(
+    file,
+    {
+      SOPClassUID: "1.2.840.10008.5.1.4.1.1.66.4",
+      Modality: "SEG",
+      SegmentationType: "BINARY",
+      SamplesPerPixel: 1,
+      PhotometricInterpretation: "MONOCHROME2",
+      NumberOfFrames: 3,
+      Rows: 16,
+      Columns: 16,
+      BitsAllocated: 1,
+      BitsStored: 1,
+      HighBit: 0,
+    },
+    pixels
+  );
+}
+
+/** Native 8-bit colour: two 4x2 frames, each sample value its own index. */
+function writeColor(file, attributes, bytesPerFrame) {
+  const pixels = Buffer.alloc(2 * bytesPerFrame);
+  pixels.forEach((_, i) => (pixels[i] = i));
+  writeNative(
+    file,
+    {
+      SOPClassUID: "1.2.840.10008.5.1.4.1.1.7",
+      Modality: "OT",
+      SamplesPerPixel: 3,
+      NumberOfFrames: 2,
+      Rows: 2,
+      Columns: 4,
+      BitsAllocated: 8,
+      BitsStored: 8,
+      HighBit: 7,
+      ...attributes,
+    },
+    pixels
+  );
+  return pixels;
+}
+
+async function frames(file) {
+  const all = [];
+  await readPart10Frames({
+    dcmjs,
+    inputPath: file,
+    onFrame: async (frame) => all.push([...frame]),
+  });
+  return all;
+}
+
+// API: the written header always describes the written samples.
+test("planar RGB and native YBR_FULL_422 are written as interleaved full-resolution samples", async () => {
+  const dir = path.join(tmpDir, "color");
+  fs.mkdirSync(dir, { recursive: true });
+  const planar = writeColor(
+    path.join(dir, "planar.dcm"),
+    { PhotometricInterpretation: "RGB", PlanarConfiguration: 1 },
+    24
+  );
+  const ybr = writeColor(
+    path.join(dir, "ybr.dcm"),
+    { PhotometricInterpretation: "YBR_FULL_422", PlanarConfiguration: 0 },
+    16
+  );
+
+  let previous = dir;
+  for (const to of ["rle", "deflate", "explicit-le"]) {
+    const out = path.join(tmpDir, `color-${to}`);
+    expect((await transcode([previous], { to, directory: out })).code).toBe(0);
+    previous = out;
+  }
+
+  // Planar R R .. G G .. B B .. per frame becomes R G B R G B ..
+  const interleaved = (f) =>
+    Array.from(
+      { length: 24 },
+      (_, i) => planar[f * 24 + (i % 3) * 8 + Math.floor(i / 3)]
+    );
+  expect(await frames(path.join(previous, "planar.dcm"))).toEqual([
+    interleaved(0),
+    interleaved(1),
+  ]);
+  // Y0 Y1 Cb Cr becomes Y0 Cb Cr Y1 Cb Cr.
+  const upsampled = (f) =>
+    Array.from({ length: 4 }, (_, k) => {
+      const [y0, y1, cb, cr] = ybr.subarray(f * 16 + k * 4, f * 16 + k * 4 + 4);
+      return [y0, cb, cr, y1, cb, cr];
+    }).flat();
+  expect(await frames(path.join(previous, "ybr.dcm"))).toEqual([
+    upsampled(0),
+    upsampled(1),
+  ]);
+
+  const header = async (name) =>
+    (await readPart10Header({ dcmjs, inputPath: path.join(previous, name) }))
+      .dict;
+  expect((await header("planar.dcm"))["00280006"].Value[0]).toBe(0);
+  expect((await header("ybr.dcm"))["00280004"].Value[0]).toBe("YBR_FULL");
+});
+
+// User experience: a header that cannot split the pixel data changes nothing.
+test("a native file without Rows fails, and the file stays as it was", async () => {
+  const file = path.join(tmpDir, "no-rows.dcm");
+  writeNative(
+    file,
+    {
+      SOPClassUID: "1.2.840.10008.5.1.4.1.1.7",
+      SamplesPerPixel: 1,
+      PhotometricInterpretation: "MONOCHROME2",
+      Columns: 4,
+      BitsAllocated: 8,
+      BitsStored: 8,
+      HighBit: 7,
+    },
+    Buffer.alloc(16, 7)
+  );
+  const before = fs.readFileSync(file);
+  const { code, err } = await transcode([file], { to: "deflate", quiet: true });
+  expect(code).toBe(1);
+  expect(err).toMatch(/Rows, Columns and BitsAllocated must be/);
+  expect(fs.readFileSync(file).equals(before)).toBe(true);
+});
 
 // API: 1-bit frames keep every bit through rle and deflate (CP-2301, Sup 244).
 test("a BINARY SEG round trips through rle, deflate and explicit-le", async () => {

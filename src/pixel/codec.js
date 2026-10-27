@@ -29,6 +29,11 @@ function codec() {
 
 const first = (dict, tag) => dict[tag]?.Value?.[0];
 
+/** True when frames are stored as plain samples (native, or deflated). */
+export const hasNativeLayout = (transferSyntaxUID) =>
+  isNativeSyntax(transferSyntaxUID) ||
+  transferSyntaxUID === DEFLATED_IMAGE_FRAME;
+
 /** The dicom-codec imageInfo of a tag-keyed dataset. */
 export function imageInfoFromDict(dict) {
   const pixelRepresentation = first(dict, "00280103") ?? 0;
@@ -40,15 +45,34 @@ export function imageInfoFromDict(dict) {
     planarConfiguration: first(dict, "00280006") ?? 0,
     pixelRepresentation,
     signed: pixelRepresentation === 1,
+    photometric: first(dict, "00280004"),
   };
 }
+
+/** Native YBR_FULL_422 stores two pixels in Y Y Cb Cr (PS3.3 C.7.6.3.1.2). */
+const isNative422 = (imageInfo) =>
+  imageInfo.photometric === "YBR_FULL_422" &&
+  imageInfo.samplesPerPixel === 3 &&
+  imageInfo.bitsAllocated === 8;
 
 /**
  * Bytes in one native frame. A 1-bit frame is its packed bytes; native 1-bit
  * frames are packed back to back, so one that does not end on a byte
- * boundary is refused.
+ * boundary is refused. YBR_FULL_422 has 2 bytes per pixel.
  */
 export function nativeFrameBytes(imageInfo) {
+  const { rows, columns, bitsAllocated } = imageInfo;
+  if (
+    ![rows, columns, bitsAllocated].every((n) => Number.isInteger(n) && n > 0)
+  ) {
+    throw new Error(
+      "Rows, Columns and BitsAllocated must be positive whole numbers " +
+        "to split native pixel data into frames"
+    );
+  }
+  if (isNative422(imageInfo)) {
+    return rows * columns * 2;
+  }
   if (imageInfo.bitsAllocated === 1) {
     const bits = imageInfo.rows * imageInfo.columns * imageInfo.samplesPerPixel;
     if (bits % 8) {
@@ -76,14 +100,57 @@ export function hasDecoder(transferSyntaxUID) {
 const asUint8 = (bytes) =>
   new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
+/** Y Y Cb Cr pairs to one Y Cb Cr per pixel, the chroma repeated. */
+function upsample422(frame, { rows, columns }) {
+  const out = new Uint8Array(rows * columns * 3);
+  for (let i = 0, o = 0; o < out.length; i += 4, o += 6) {
+    out[o] = frame[i];
+    out[o + 3] = frame[i + 1];
+    out[o + 1] = out[o + 4] = frame[i + 2];
+    out[o + 2] = out[o + 5] = frame[i + 3];
+  }
+  return out;
+}
+
+/** Plane-by-plane samples (PlanarConfiguration 1) to interleaved samples. */
+function interleave(planar, { rows, columns, samplesPerPixel, bitsAllocated }) {
+  const bytes = bitsAllocated / 8;
+  const pixels = rows * columns;
+  const plane = pixels * bytes;
+  const out = new Uint8Array(plane * samplesPerPixel);
+  for (let s = 0; s < samplesPerPixel; s++) {
+    for (let p = 0; p < pixels; p++) {
+      for (let b = 0; b < bytes; b++) {
+        out[(p * samplesPerPixel + s) * bytes + b] =
+          planar[s * plane + p * bytes + b];
+      }
+    }
+  }
+  return out;
+}
+
+/** Native frame bytes as full-resolution interleaved samples. */
+function nativeToInterleaved(pixels, imageInfo) {
+  if (isNative422(imageInfo)) {
+    return upsample422(pixels, imageInfo);
+  }
+  if (imageInfo.samplesPerPixel > 1 && imageInfo.planarConfiguration === 1) {
+    return interleave(pixels, imageInfo);
+  }
+  return pixels;
+}
+
 /**
  * Decodes one frame to interleaved samples; a 1-bit frame decodes to its
- * packed bytes.
+ * packed bytes. Native YBR_FULL_422 decodes to full-resolution YBR_FULL.
  */
 export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
   if (transferSyntaxUID === DEFLATED_IMAGE_FRAME) {
     // Inflate stops at the end of the deflate stream, before any pad byte.
-    return asUint8(zlib.inflateRawSync(frame));
+    return nativeToInterleaved(asUint8(zlib.inflateRawSync(frame)), imageInfo);
+  }
+  if (isNativeSyntax(transferSyntaxUID) && isNative422(imageInfo)) {
+    return upsample422(frame, imageInfo);
   }
   if (imageInfo.bitsAllocated === 1) {
     if (isNativeSyntax(transferSyntaxUID)) {
@@ -103,16 +170,18 @@ export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
       pixelRepresentation: 0,
     };
   }
+  // The RLE decoder writes plane by plane for PlanarConfiguration 1.
   const { imageFrame } = await codec().decode(
     frame,
-    imageInfo,
+    transferSyntaxUID === RLE_LOSSLESS
+      ? { ...imageInfo, planarConfiguration: 0 }
+      : imageInfo,
     transferSyntaxUID
   );
-  return new Uint8Array(
-    imageFrame.buffer,
-    imageFrame.byteOffset,
-    imageFrame.byteLength
-  );
+  const pixels = asUint8(imageFrame);
+  return isNativeSyntax(transferSyntaxUID)
+    ? nativeToInterleaved(pixels, imageInfo)
+    : pixels;
 }
 
 /**

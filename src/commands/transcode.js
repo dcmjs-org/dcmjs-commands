@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { discoverDicomFiles } from "../io.js";
-import { readPart10Frames } from "../pixel/frameReader.js";
+import { checkFrameCount, readPart10Frames } from "../pixel/frameReader.js";
 import { FrameSpool, writePart10WithFrames } from "../pixel/frameWriter.js";
 import {
   hasDecoder,
@@ -225,6 +225,14 @@ export async function transcodeFile({
           !copyFrames &&
           lossyTarget &&
           !isBitstreamTranscode(sourceUid, target.uid);
+        if (
+          !skip &&
+          !copyFrames &&
+          !isBitstreamTranscode(sourceUid, target.uid)
+        ) {
+          // Decoding needs the frame size; this throws when it is missing.
+          nativeFrameBytes(imageInfo);
+        }
         if (!skip && lossy && !allowLossy) {
           throw new Error(
             `${target.name} is lossy — pass --lossy to accept the loss, or ` +
@@ -273,6 +281,9 @@ export async function transcodeFile({
       return skip ? { skipped: skip, before } : { before, sourceUid };
     }
 
+    if (read.hasPixelData) {
+      checkFrameCount(read);
+    }
     const { meta, dict } = read;
     rewrite?.(meta, dict);
     if (!read.hasPixelData) {

@@ -7,7 +7,11 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { discoverDicomFiles } from "../io.js";
-import { readPart10Frames, readPart10Header } from "../pixel/frameReader.js";
+import {
+  checkFrameCount,
+  readPart10Frames,
+  readPart10Header,
+} from "../pixel/frameReader.js";
 import { FrameSpool, writePart10WithFrames } from "../pixel/frameWriter.js";
 import { decodeFrame, encodeFrame, imageInfoFromDict } from "../pixel/codec.js";
 import { photometricAfter, updatePixelHeader } from "../pixel/pixelHeader.js";
@@ -84,8 +88,10 @@ Output (one is required):
   --in-place              replace the pyramid in its directory. The base
                           level keeps its SOPInstanceUID and the series keeps
                           its SeriesInstanceUID, so references to the base
-                          level (for example bulk annotations) stay valid.
-                          The other old pyramid levels are deleted.
+                          level (for example bulk annotations) stay valid,
+                          also with a lossy preset (a warning is printed).
+                          The other old levels of the same optical path and
+                          focal plane are deleted.
 
 Options:
   -p, --preset <name>     ${Object.keys(PRESETS).join(", ")}
@@ -97,7 +103,8 @@ Options:
                             jpeg-512      JPEG quality 90, 512px, factor 2
                           jxl presets are progressive.
   -t, --to <syntax>       override the preset transfer syntax
-                          (jxl, jxl-lossless, jpeg, explicit-le)
+                          (jxl, jxl-lossless, jpeg, explicit-le, rle,
+                          deflate)
   --tile <px>             override the tile size (a multiple of the factor)
   --factor <n>            override the factor between levels (2..8)
   --quality <q>           jpeg: quality 1..100; jxl: quality 0..100 (as cjxl)
@@ -188,9 +195,26 @@ export function parseWsiResizeOptions(values) {
   };
 }
 
-/** Pyramids by SeriesInstanceUID: `{ base, levels, others }`. */
+/**
+ * The optical path and focal plane of an image. Each channel or plane of a
+ * series is its own pyramid, so `--in-place` never deletes another one.
+ */
+function planeKey(dict) {
+  const paths = (dict["00480105"]?.Value ?? [])
+    .map((item) => first(item, "00480106"))
+    .join("\\");
+  const groups = dict["52009229"]?.Value?.[0] ?? dict["52009230"]?.Value?.[0];
+  const position = groups?.["0048021A"]?.Value?.[0];
+  const z = position ? first(position, "0040074A") : undefined;
+  return `${paths}|${z ?? ""}`;
+}
+
+/**
+ * Pyramids by SeriesInstanceUID, optical path and focal plane:
+ * `{ uid, key, base, levels, others }`.
+ */
 async function findPyramids(dcmjs, positionals) {
-  const series = new Map();
+  const pyramids = new Map();
   for (const input of positionals) {
     for (const file of discoverDicomFiles(input)) {
       const { meta, dict } = await readPart10Header({ dcmjs, inputPath: file });
@@ -198,12 +222,14 @@ async function findPyramids(dcmjs, positionals) {
         continue;
       }
       const uid = first(dict, "0020000E");
-      if (!series.has(uid)) {
-        series.set(uid, { uid, levels: [], others: [] });
+      const key = planeKey(dict);
+      const id = `${uid}|${key}`;
+      if (!pyramids.has(id)) {
+        pyramids.set(id, { uid, key, levels: [], others: [] });
       }
       const entry = { path: file, meta, dict };
       const imageType = dict["00080008"]?.Value ?? [];
-      const group = series.get(uid);
+      const group = pyramids.get(id);
       (PYRAMID_TYPES.has(imageType[2]) ? group.levels : group.others).push(
         entry
       );
@@ -211,13 +237,47 @@ async function findPyramids(dcmjs, positionals) {
   }
   const area = ({ dict }) =>
     Number(first(dict, "00480006") ?? 0) * Number(first(dict, "00480007") ?? 0);
-  for (const group of series.values()) {
+  const groups = [...pyramids.values()];
+  for (const group of groups) {
     group.levels.sort((a, b) => area(b) - area(a));
     group.base = group.levels.find(
       (l) => (l.dict["00080008"]?.Value ?? [])[2] === "VOLUME"
     );
+    group.shared = groups.filter((g) => g.uid === group.uid).length > 1;
   }
-  return [...series.values()].filter((g) => g.base);
+  return groups.filter((g) => g.base);
+}
+
+function checkPlanes({ dict, path: file }) {
+  if (
+    Number(first(dict, "00480303") ?? 1) > 1 ||
+    Number(first(dict, "00480302") ?? 1) > 1
+  ) {
+    throw new Error(
+      `${file}: more than one focal plane or optical path in one image is ` +
+        "not supported"
+    );
+  }
+}
+
+/** Refuses a pyramid that the rebuild would not reproduce in full. */
+function checkPyramid(group) {
+  for (const level of group.levels) {
+    checkPlanes(level);
+  }
+  const { base } = group;
+  const twin = group.levels.find(
+    (l) =>
+      l !== base &&
+      first(l.dict, "00480006") === first(base.dict, "00480006") &&
+      first(l.dict, "00480007") === first(base.dict, "00480007")
+  );
+  if (twin) {
+    throw new Error(
+      `${base.path} and ${twin.path} are both full-size levels of one ` +
+        "optical path and focal plane, so the pyramid of each level is unclear"
+    );
+  }
 }
 
 function checkBase({ dict, path: file }) {
@@ -229,12 +289,6 @@ function checkBase({ dict, path: file }) {
   }
   if (![1, 3].includes(first(dict, "00280002"))) {
     fail("SamplesPerPixel must be 1 or 3");
-  }
-  if (
-    Number(first(dict, "00480303") ?? 1) > 1 ||
-    Number(first(dict, "00480302") ?? 1) > 1
-  ) {
-    fail("more than one focal plane or optical path is not supported");
   }
   // A concatenation of one part holds every frame and is accepted.
   if (
@@ -379,9 +433,11 @@ async function resizeSeries({
   inPlace,
   dryRun,
   progress,
+  newSeriesUid,
 }) {
   const { base } = group;
   checkBase(base);
+  checkPyramid(group);
   const { tile, factor, target, encode } = options;
   const width = Number(first(base.dict, "00480006"));
   const height = Number(first(base.dict, "00480007"));
@@ -397,6 +453,7 @@ async function resizeSeries({
 
   const report = {
     series: group.uid,
+    pyramid: group.shared ? group.key : undefined,
     base: base.path,
     totalPixelMatrix: { width, height, samplesPerPixel: spp },
     levelsBefore: group.levels.map((l) => ({
@@ -420,7 +477,7 @@ async function resizeSeries({
     tiles: levels.reduce((sum, l) => sum + l.frames, 0),
   });
 
-  const seriesUid = inPlace ? group.uid : dcmjs.data.DicomMetaDictionary.uid();
+  const seriesUid = inPlace ? group.uid : newSeriesUid(group.uid);
   const pyramidUid = inPlace
     ? first(base.dict, "00080019")
     : dcmjs.data.DicomMetaDictionary.uid();
@@ -439,7 +496,7 @@ async function resizeSeries({
         ? base.path
         : path.join(
             seriesDir,
-            inPlace ? `${sop}.dcm` : `level-${plan.level}.dcm`
+            inPlace || group.shared ? `${sop}.dcm` : `level-${plan.level}.dcm`
           );
     const tempPath = path.join(
       seriesDir,
@@ -531,6 +588,7 @@ async function resizeSeries({
         await sourceSpool.remove();
       }
     }
+    checkFrameCount(read);
     await assembler.finish();
     await builder.finish();
     addTotals(before, read);
@@ -624,6 +682,23 @@ export async function runWsiResize({
     return 1;
   }
 
+  if (inPlace && options.target.lossy && !dryRun) {
+    stderr(
+      `dcmjs wsiresize: warning: ${options.target.name} is lossy, and ` +
+        "--in-place keeps the base SOPInstanceUID. A system that already " +
+        "holds that instance can keep the old pixels."
+    );
+  }
+
+  // Pyramids of one source series (channels, focal planes) share a series.
+  const newSeries = new Map();
+  const newSeriesUid = (uid) => {
+    if (!newSeries.has(uid)) {
+      newSeries.set(uid, dcmjs.data.DicomMetaDictionary.uid());
+    }
+    return newSeries.get(uid);
+  };
+
   const reports = [];
   let failed = 0;
   const progress = new Progress({
@@ -643,6 +718,7 @@ export async function runWsiResize({
           inPlace,
           dryRun,
           progress,
+          newSeriesUid,
         })
       );
     } catch (err) {
@@ -686,7 +762,11 @@ export async function runWsiResize({
       continue;
     }
     const { width, height, samplesPerPixel } = report.totalPixelMatrix;
-    stdout(`wsiresize: series ${report.series}${dryRun ? " (dry run)" : ""}`);
+    stdout(
+      `wsiresize: series ${report.series}` +
+        `${report.pyramid ? ` (optical path|focal plane ${report.pyramid})` : ""}` +
+        `${dryRun ? " (dry run)" : ""}`
+    );
     stdout(
       `  ${options.presetName}: ${codec}, ${tile}px tiles, factor ${factor}` +
         `${encode.progressive ? ", progressive" : ""}`
