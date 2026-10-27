@@ -289,6 +289,20 @@ describe("dcmjs dicomweb command", () => {
     ).toBe(true);
   });
 
+  test("a duplicate SOPInstanceUID is skipped with a warning, not dropped silently", async () => {
+    writeSourceTree(dir);
+    writeInstance(path.join(dir, "S3", "COPY"), {
+      sopUid: "2.25.101",
+      seriesUid: "2.25.11",
+      instanceNumber: 1,
+    });
+    const access = await DicomAccess.createInstance(dir, {});
+    const { skipped } = await access.scan();
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].file).toMatch(/S3[\\/]COPY$/);
+    expect(skipped[0].error).toMatch(/duplicate SOPInstanceUID 2\.25\.101/);
+  });
+
   test("missing directory prints usage", async () => {
     const err = capture();
     const code = await runDicomweb({
@@ -340,6 +354,33 @@ describe("frame extraction", () => {
     );
     const frame2 = new Uint16Array(extractFrame([pixels.buffer], 2, entry));
     expect(Array.from(frame2)).toEqual(Array.from(pixels.slice(16, 32)));
+  });
+
+  test("1-bit frames are packed with no padding between frames", () => {
+    // 5x5 frames = 25 bits each; frame 2 starts at bit 25 (byte 3, bit 1).
+    const bits = [];
+    for (let frame = 0; frame < 3; frame++) {
+      for (let i = 0; i < 25; i++) {
+        bits.push((i + frame) % 3 === 0 ? 1 : 0);
+      }
+    }
+    const packed = new Uint8Array(Math.ceil(bits.length / 8));
+    bits.forEach((bit, i) => {
+      packed[i >> 3] |= bit << (i % 8);
+    });
+    const entry = entryFor(
+      { Rows: 5, Columns: 5, BitsAllocated: 1, NumberOfFrames: 3 },
+      { encapsulated: false }
+    );
+    for (let frame = 1; frame <= 3; frame++) {
+      const out = new Uint8Array(extractFrame([packed.buffer], frame, entry));
+      expect(out.byteLength).toBe(4);
+      const got = Array.from(
+        { length: 25 },
+        (_, i) => (out[i >> 3] >> (i % 8)) & 1
+      );
+      expect(got).toEqual(bits.slice((frame - 1) * 25, frame * 25));
+    }
   });
 
   test("encapsulated with one fragment per frame maps directly", () => {

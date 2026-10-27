@@ -53,13 +53,24 @@ function concatToArrayBuffer(fragments) {
 export function makeDicomWebSanitizeFilter({ sopUID, bulkdataMap, frameInfo }) {
   let mode = null; // null | "pixel" | "bulk" | "dropped"
   let fragments = null;
+  // Only the top-level PixelData is the instance's frames; a nested one
+  // (IconImageSequence) is stored as ordinary bulkdata.
+  let sequenceDepth = 0;
   return {
+    startSequence(next, tag, info) {
+      sequenceDepth++;
+      return next(tag, info);
+    },
+    endSequence(next) {
+      sequenceDepth--;
+      return next();
+    },
     startElement(next, tag, info) {
       if (tag.startsWith("_")) {
         mode = "dropped";
         return;
       }
-      if (tag.toUpperCase() === PIXEL_DATA) {
+      if (sequenceDepth === 0 && tag.toUpperCase() === PIXEL_DATA) {
         mode = "pixel";
         frameInfo.valueCount = 0;
         return next(tag, { ...info, vr: info?.vr || "OB" });

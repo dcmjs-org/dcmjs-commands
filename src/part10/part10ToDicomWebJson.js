@@ -167,12 +167,8 @@ export function extractFrame(pixelValue, frame, entry) {
   const samples = Number(natural.SamplesPerPixel) || 1;
   const rows = Number(natural.Rows);
   const columns = Number(natural.Columns);
-  const frameSize =
-    bits === 1
-      ? Math.ceil((rows * columns * samples) / 8)
-      : rows * columns * samples * (bits / 8);
-
-  const needed = frameSize * numberOfFrames;
+  const frameBits = rows * columns * samples * bits;
+  const needed = Math.ceil((frameBits * numberOfFrames) / 8);
   // tolerate the writer's single trailing pad byte
   if (!(buffer.byteLength === needed || buffer.byteLength === needed + 1)) {
     if (buffer.byteLength < needed) {
@@ -183,5 +179,38 @@ export function extractFrame(pixelValue, frame, entry) {
       );
     }
   }
-  return buffer.slice((frame - 1) * frameSize, frame * frameSize);
+  if (frameBits % 8 === 0) {
+    const frameSize = frameBits / 8;
+    return buffer.slice((frame - 1) * frameSize, frame * frameSize);
+  }
+  return extractBitPackedFrame(buffer, (frame - 1) * frameBits, frameBits);
+}
+
+/**
+ * Copy one frame of bit-packed (BitsAllocated 1) pixel data into its own
+ * buffer. DICOM packs 1-bit frames with no padding between frames, so a
+ * frame whose bit count is not a multiple of 8 starts inside a byte. Bits
+ * are little-endian within each byte (pixel 0 is bit 0); the last output
+ * byte is zero-padded.
+ *
+ * @param {ArrayBuffer} buffer - all frames
+ * @param {number} startBit - bit offset of the frame in buffer
+ * @param {number} frameBits - bits in one frame
+ * @returns {ArrayBuffer}
+ */
+export function extractBitPackedFrame(buffer, startBit, frameBits) {
+  const source = new Uint8Array(buffer);
+  const out = new Uint8Array(Math.ceil(frameBits / 8));
+  const shift = startBit % 8;
+  const first = startBit >> 3;
+  for (let i = 0; i < out.length; i++) {
+    const low = source[first + i] >> shift;
+    const high = shift ? (source[first + i + 1] ?? 0) << (8 - shift) : 0;
+    out[i] = (low | high) & 0xff;
+  }
+  const tailBits = frameBits % 8;
+  if (tailBits) {
+    out[out.length - 1] &= (1 << tailBits) - 1;
+  }
+  return out.buffer;
 }

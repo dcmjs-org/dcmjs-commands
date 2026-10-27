@@ -132,3 +132,25 @@ test("event-stream sanitize matches the previous implementation on the fixture",
   // Frame bookkeeping unchanged.
   expect(entry.frameInfo.valueCount).toBe(refFrames.valueCount);
 });
+
+test("icon PixelData in IconImageSequence is bulkdata, not the instance frames", async () => {
+  const dicomDict = readDicomDict(FIXTURE);
+  const iconBytes = new Uint8Array([1, 2, 3, 4]).buffer;
+  dicomDict.dict["00880200"] = {
+    vr: "SQ",
+    Value: [{ "7FE00010": { vr: "OB", Value: [iconBytes] } }],
+  };
+
+  const entry = await part10ToEntry(dicomDict, FIXTURE);
+
+  const sop = dicomDict.dict["00080018"].Value[0];
+  expect(entry.jsonData[PIXEL_DATA].BulkDataURI).toBe(
+    `instances/${sop}/frames`
+  );
+  const iconUri = entry.jsonData["00880200"].Value[0][PIXEL_DATA].BulkDataURI;
+  expect(iconUri).not.toMatch(/frames/);
+  expect(Buffer.from(entry.bulkdataMap.get(iconUri))).toEqual(
+    Buffer.from(iconBytes)
+  );
+  expect(entry.frameInfo.valueCount).toBe(1);
+});

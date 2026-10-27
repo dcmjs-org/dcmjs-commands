@@ -74,6 +74,20 @@ export class Part10DirectoryAccess extends DicomAccess {
         instances = new Map();
         series.set(entry.seriesUID, instances);
       }
+      const kept = instances.get(entry.sopUID);
+      if (kept) {
+        dicomIssueLog.warn(
+          "Skipping duplicate SOPInstanceUID",
+          filePath,
+          "same as",
+          kept.filePath
+        );
+        skipped.push({
+          file: filePath,
+          error: `duplicate SOPInstanceUID ${entry.sopUID} (kept ${kept.filePath})`,
+        });
+        continue;
+      }
       instances.set(entry.sopUID, entry);
     }
     log.info(
