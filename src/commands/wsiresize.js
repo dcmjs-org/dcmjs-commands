@@ -266,6 +266,31 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
   let groups = [...pyramids.values()];
   const area = ({ dict }) =>
     Number(first(dict, "00480006") ?? 0) * Number(first(dict, "00480007") ?? 0);
+  // Focal planes are told apart by the full-size levels only: a small level
+  // of one tile has a constant Z even in a focus-map slide. When the
+  // full-size levels of an optical path do not have distinct Z keys, all
+  // its levels are one pyramid.
+  for (const group of groups) {
+    const siblings = groups.filter(
+      (g) => g.uid === group.uid && g.paths === group.paths && g.levels.length
+    );
+    if (!group.levels.length || siblings[0] !== group) {
+      continue;
+    }
+    const largest = Math.max(...siblings.flatMap((g) => g.levels.map(area)));
+    const fullSize = siblings.filter((g) =>
+      g.levels.some((l) => area(l) === largest)
+    );
+    if (fullSize.length === 1 && siblings.length > 1) {
+      const [keep] = fullSize;
+      for (const g of siblings) {
+        if (g !== keep) {
+          keep.levels.push(...g.levels);
+          g.levels = [];
+        }
+      }
+    }
+  }
   // Levels without a Z key (TILED_FULL levels, focus maps) join the one
   // focal plane of their optical path. With several planes they cannot be
   // placed: they are reported and left as they are.
@@ -315,9 +340,9 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
 
 /**
  * Refuses an image with more than one focal plane or optical path by its
- * count attributes. The counts are optional for TILED_SPARSE, so the base
- * is also refused when two frames share a tile position (rasterOrder); a
- * varying Z offset alone is a focus map, which is allowed.
+ * count attributes. The counts are optional for TILED_SPARSE, so an image
+ * is also refused when two frames share a tile position
+ * (checkOneTilePerPosition); a varying Z offset alone is a focus map.
  */
 function checkPlanes({ dict, path: file }) {
   if (
@@ -355,9 +380,10 @@ function checkOneTilePerPosition({ dict, path: file }) {
 }
 
 /** Refuses a pyramid that the rebuild would not reproduce in full. */
-function checkPyramid(group) {
-  // Every level: the base is rebuilt, and the others are deleted.
-  for (const level of group.levels) {
+function checkPyramid(group, inPlace) {
+  // The base is rebuilt; the other levels matter only to --in-place,
+  // which deletes them.
+  for (const level of inPlace ? group.levels : [group.base]) {
     checkPlanes(level);
     checkOneTilePerPosition(level);
   }
@@ -736,7 +762,7 @@ async function resizeSeries({
 }) {
   const { base } = group;
   checkBase(base);
-  checkPyramid(group);
+  checkPyramid(group, inPlace);
   const shared = sharedGroups(base);
   // Only a group with its own Z offset can give sparse levels their Z.
   const geometry =

@@ -451,16 +451,19 @@ export async function runTranscode({
       ? path.join(outDir, path.relative(root, inputPath))
       : inputPath;
     try {
-      // Two inputs with the same relative path would write one file.
-      const key = outputKey(outputPath);
-      const earlier = outputs.get(key);
-      if (earlier) {
-        throw new Error(
-          `${outputPath} is already the output of ${earlier}; give the ` +
-            "inputs separate -d runs"
-        );
+      // With -d, two inputs with the same relative path would write one
+      // file; in place, the outputs are the inputs, already deduplicated.
+      if (outDir) {
+        const key = outputKey(outputPath);
+        const earlier = outputs.get(key);
+        if (earlier) {
+          throw new Error(
+            `${outputPath} is already the output of ${earlier}; give the ` +
+              "inputs separate -d runs"
+          );
+        }
+        outputs.set(key, inputPath);
       }
-      outputs.set(key, inputPath);
       if (outDir && !dryRun) {
         fs.mkdirSync(path.dirname(outputPath), { recursive: true });
       }

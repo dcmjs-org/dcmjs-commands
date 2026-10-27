@@ -226,7 +226,8 @@ rules:
   sets TotalPixelMatrixFocalPlanes and NumberOfOpticalPaths to 1 (Type 1C for TILED_FULL).
 - **WR-I4.** Only 8-bit samples, one or three samples per pixel, and one focal plane and
   one optical path in each image are supported. The count attributes are optional for
-  TILED_SPARSE, so a base whose frames hold the same tile position twice is refused too. A
+  TILED_SPARSE, so an image whose frames hold the same tile position twice is refused too:
+  the base always, and with `--in-place` also every level that the command would delete. A
   Z offset that varies from tile to tile, at distinct positions, is the focus map of one
   plane and is accepted. A concatenation of more than one part is refused.
 - **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
@@ -237,8 +238,10 @@ rules:
   leaves it as it is and names it on stderr. A full-size level that cannot be placed is a
   plane that is not rebuilt, so it is an error and counts as a failure; a smaller one is a
   warning. A plane group without a VOLUME base is reported the same way, never dropped
-  silently. Every level of a pyramid, not only the base, is refused when two of its frames
-  share a tile position. LABEL and OVERVIEW images are
+  silently. Focal planes are told apart by the full-size levels only: when the full-size
+  levels of an optical path do not have distinct Z keys, all its levels are one pyramid,
+  because a small level of one tile has a constant Z even in a focus-map slide. LABEL and
+  OVERVIEW images are
   not grouped. A file that two inputs hold is read once. A file whose header cannot be read
   is reported on stderr, counted as a failure, and skipped; the other series still run.
   `transcode --new-series` skips such a file in its UID plan, and the copy step reports it.
