@@ -5,13 +5,18 @@
 // WASM modules.
 
 import { createRequire } from "node:module";
+import zlib from "node:zlib";
 import {
+  DEFLATED_IMAGE_FRAME,
   EXPLICIT_LITTLE_ENDIAN,
   JPEG_BASELINE,
   JPEG_XL,
   JPEG_XL_JPEG_RECOMPRESSION,
   JPEG_XL_LOSSLESS,
+  RLE_LOSSLESS,
+  isNativeSyntax,
 } from "./transferSyntaxes.js";
+import { encodeRleFrame } from "./rle.js";
 
 let dicomCodec;
 
@@ -38,10 +43,20 @@ export function imageInfoFromDict(dict) {
   };
 }
 
-/** Bytes in one native frame; 1-bit packed frames are refused. */
+/**
+ * Bytes in one native frame. A 1-bit frame is its packed bytes; native 1-bit
+ * frames are packed back to back, so one that does not end on a byte
+ * boundary is refused.
+ */
 export function nativeFrameBytes(imageInfo) {
   if (imageInfo.bitsAllocated === 1) {
-    throw new Error("1-bit native pixel data is not supported");
+    const bits = imageInfo.rows * imageInfo.columns * imageInfo.samplesPerPixel;
+    if (bits % 8) {
+      throw new Error(
+        "1-bit frames that do not end on a byte boundary are not supported"
+      );
+    }
+    return bits / 8;
   }
   return (
     imageInfo.rows *
@@ -52,11 +67,42 @@ export function nativeFrameBytes(imageInfo) {
 }
 
 export function hasDecoder(transferSyntaxUID) {
-  return codec().hasCodec(transferSyntaxUID);
+  return (
+    transferSyntaxUID === DEFLATED_IMAGE_FRAME ||
+    codec().hasCodec(transferSyntaxUID)
+  );
 }
 
-/** Decodes one frame to interleaved samples. */
+const asUint8 = (bytes) =>
+  new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+/**
+ * Decodes one frame to interleaved samples; a 1-bit frame decodes to its
+ * packed bytes.
+ */
 export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
+  if (transferSyntaxUID === DEFLATED_IMAGE_FRAME) {
+    // Inflate stops at the end of the deflate stream, before any pad byte.
+    return asUint8(zlib.inflateRawSync(frame));
+  }
+  if (imageInfo.bitsAllocated === 1) {
+    if (isNativeSyntax(transferSyntaxUID)) {
+      return frame;
+    }
+    if (transferSyntaxUID !== RLE_LOSSLESS) {
+      throw new Error(
+        `1-bit pixel data in transfer syntax ${transferSyntaxUID} is not supported`
+      );
+    }
+    // One RLE segment of packed bytes: decode it as a row of 8-bit samples.
+    imageInfo = {
+      rows: 1,
+      columns: nativeFrameBytes(imageInfo),
+      bitsAllocated: 8,
+      samplesPerPixel: 1,
+      pixelRepresentation: 0,
+    };
+  }
   const { imageFrame } = await codec().decode(
     frame,
     imageInfo,
@@ -73,11 +119,24 @@ export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
  * Encodes interleaved samples to `targetUid`.
  *
  * @param {object} options `quality` (JPEG, 1..100), `distance` (JPEG XL,
- *   0..25), `lossless` (JPEG XL .112), `effort` (1..9), `progressive`.
+ *   0..25), `lossless` (JPEG XL .112), `effort` (JPEG XL effort or deflate
+ *   level, 1..9; deflate defaults to 9), `progressive`.
  */
 export async function encodeFrame(pixels, imageInfo, targetUid, options = {}) {
   if (targetUid === EXPLICIT_LITTLE_ENDIAN) {
     return pixels;
+  }
+  if (targetUid === RLE_LOSSLESS) {
+    return encodeRleFrame(pixels, imageInfo);
+  }
+  if (targetUid === DEFLATED_IMAGE_FRAME) {
+    return asUint8(zlib.deflateRawSync(pixels, { level: options.effort ?? 9 }));
+  }
+  if (imageInfo.bitsAllocated === 1) {
+    throw new Error(
+      "Bits Allocated 1 can be written only as explicit-le, rle or deflate " +
+        "(PS3.5 CP-2301, Sup 244)"
+    );
   }
   const encodeOptions = jxlOptions(targetUid, options);
   if (targetUid === JPEG_BASELINE) {

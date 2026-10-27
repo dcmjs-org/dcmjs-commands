@@ -184,6 +184,79 @@ test("--new-series needs -d", async () => {
   expect(err).toMatch(/--new-series needs -d <dir>/);
 });
 
+/** A native 1-bit BINARY SEG of three 16x16 frames. */
+function writeBinarySeg(file) {
+  const { DicomMetaDictionary, DicomDict } = dcmjs.data;
+  const sop = DicomMetaDictionary.uid();
+  const pixels = crypto.randomBytes(3 * 32);
+  pixels.fill(0, 0, 16); // long runs as well as noise
+  const dict = DicomMetaDictionary.denaturalizeDataset({
+    SOPClassUID: "1.2.840.10008.5.1.4.1.1.66.4",
+    SOPInstanceUID: sop,
+    Modality: "SEG",
+    SegmentationType: "BINARY",
+    SamplesPerPixel: 1,
+    PhotometricInterpretation: "MONOCHROME2",
+    NumberOfFrames: 3,
+    Rows: 16,
+    Columns: 16,
+    BitsAllocated: 1,
+    BitsStored: 1,
+    HighBit: 0,
+    PixelRepresentation: 0,
+  });
+  const meta = DicomMetaDictionary.denaturalizeDataset({
+    FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
+    MediaStorageSOPClassUID: "1.2.840.10008.5.1.4.1.1.66.4",
+    MediaStorageSOPInstanceUID: sop,
+    TransferSyntaxUID: "1.2.840.10008.1.2.1",
+  });
+  dict["7FE00010"] = {
+    vr: "OB",
+    Value: [
+      pixels.buffer.slice(pixels.byteOffset, pixels.byteOffset + pixels.length),
+    ],
+  };
+  const part10 = new DicomDict(meta);
+  part10.dict = dict;
+  fs.writeFileSync(file, Buffer.from(part10.write()));
+}
+
+// API: 1-bit frames keep every bit through rle and deflate (CP-2301, Sup 244).
+test("a BINARY SEG round trips through rle, deflate and explicit-le", async () => {
+  const source = path.join(tmpDir, "binary", "seg.dcm");
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  writeBinarySeg(source);
+  const original = await frameHashes(source);
+  expect(original).toHaveLength(3);
+
+  let previous = source;
+  for (const to of ["rle", "deflate", "explicit-le"]) {
+    const dir = path.join(tmpDir, `binary-${to}`);
+    const result = await transcode([previous], {
+      to,
+      directory: dir,
+      quiet: true,
+    });
+    expect(result.code).toBe(0);
+    previous = path.join(dir, "seg.dcm");
+  }
+  expect(await frameHashes(previous)).toEqual(original);
+});
+
+// User experience: a 1-bit file is not silently written where it is not defined.
+test("a BINARY SEG cannot be written as JPEG XL", async () => {
+  const source = path.join(tmpDir, "binary-jxl-source.dcm");
+  writeBinarySeg(source);
+  const { code, err } = await transcode([source], {
+    to: "jxl-lossless",
+    directory: path.join(tmpDir, "binary-jxl"),
+    quiet: true,
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/Bits Allocated 1 can be written only as/);
+});
+
 // User experience: loss is never silent.
 test("a lossy target needs --lossy, and the lossy file gets a new SOPInstanceUID", async () => {
   const refused = await transcode([wsi.base.path], {

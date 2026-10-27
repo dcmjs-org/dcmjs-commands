@@ -47,6 +47,10 @@ Options:
   -t, --to <syntax>       ${OUTPUT_ALIASES.join(", ")}, or a transfer syntax UID.
                           jxl-jpeg recompresses JPEG Baseline frames without
                           loss; transcode --to jpeg gives back the same JPEG.
+                          deflate is Deflated Image Frame Compression
+                          (1.2.840.10008.1.2.8.1), one deflate stream per
+                          frame. Bits Allocated 1 data (BINARY SEG) can be
+                          written as explicit-le, rle or deflate only.
   -d, --directory <dir>   write to <dir> with the same relative paths, and
                           copy the DICOM files that need no change; the
                           input stays as it is
@@ -56,7 +60,8 @@ Options:
   --quality <q>           jpeg: quality 1..100 (default 90);
                           jxl: quality 0..100, mapped to a distance as cjxl does
   --distance <d>          jxl: Butteraugli distance 0..25 (default 1.0)
-  --effort <e>            JPEG XL effort 1..9 (default 7)
+  --effort <e>            JPEG XL effort 1..9 (default 7); deflate level
+                          1..9 (default 9)
   --progressive           write progressive JPEG XL
   --new-series            write copies that an archive accepts as new data,
                           to test re-uploads (needs -d; --to is then

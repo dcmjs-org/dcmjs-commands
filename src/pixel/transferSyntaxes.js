@@ -9,10 +9,14 @@ export const JPEG_BASELINE = "1.2.840.10008.1.2.4.50";
 export const JPEG_XL_LOSSLESS = "1.2.840.10008.1.2.4.110";
 export const JPEG_XL_JPEG_RECOMPRESSION = "1.2.840.10008.1.2.4.111";
 export const JPEG_XL = "1.2.840.10008.1.2.4.112";
+export const RLE_LOSSLESS = "1.2.840.10008.1.2.5";
+export const DEFLATED_IMAGE_FRAME = "1.2.840.10008.1.2.8.1";
 
 /**
  * `lossy` is the default for the syntax; JPEG XL (.112) becomes lossless
  * with `--lossless`. `method` is the (0028,2114) defined term.
+ * `bytePreserving` syntaxes keep the native frame bytes exactly, so they
+ * take any photometric and Bits Allocated 1 (PS3.5 CP-2301, Sup 244).
  */
 const OUTPUT_SYNTAXES = [
   {
@@ -21,6 +25,23 @@ const OUTPUT_SYNTAXES = [
     name: "Explicit VR Little Endian",
     encapsulated: false,
     lossy: false,
+    bytePreserving: true,
+  },
+  {
+    uid: RLE_LOSSLESS,
+    aliases: ["rle", "rle-lossless"],
+    name: "RLE Lossless",
+    encapsulated: true,
+    lossy: false,
+    bytePreserving: true,
+  },
+  {
+    uid: DEFLATED_IMAGE_FRAME,
+    aliases: ["deflate", "frame-deflate"],
+    name: "Deflated Image Frame Compression",
+    encapsulated: true,
+    lossy: false,
+    bytePreserving: true,
   },
   {
     uid: JPEG_BASELINE,

@@ -32,6 +32,7 @@ export function photometricAfter({ photometric, sourceUid, target }) {
   }
   if (
     target.encapsulated &&
+    !target.bytePreserving &&
     (decoded === "YBR_FULL" || (target.lossy && decoded === "PALETTE COLOR"))
   ) {
     throw new Error(
