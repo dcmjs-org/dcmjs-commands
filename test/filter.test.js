@@ -93,6 +93,21 @@ test("--set replaces a value in place", async () => {
   expect(new Uint8Array(dst.dict["7FE00010"].Value[0]).length).toBe(524288);
 });
 
+test("--set fills an element that is present but empty", async () => {
+  const src = readDict(FIXTURE);
+  src.upsertTag("00100020", "LO", []);
+  const emptyFile = path.join(tmpDir, "empty-patient-id.dcm");
+  fs.writeFileSync(emptyFile, Buffer.from(src.write()));
+
+  const outFile = path.join(tmpDir, "filled-patient-id.dcm");
+  const { code } = await filter([emptyFile], {
+    output: outFile,
+    set: ["PatientID=NEW"],
+  });
+  expect(code).toBe(0);
+  expect(readDict(outFile).dict["00100020"].Value).toEqual(["NEW"]);
+});
+
 test("--drop removes leaf elements and whole sequences", async () => {
   const outFile = path.join(tmpDir, "drop.dcm");
   const { code } = await filter([FIXTURE], {
