@@ -125,7 +125,8 @@ rules:
   hold values that are known only after encoding. `FrameSpool.append` writes a copy of each
   frame, because an encoder can return a buffer that the caller reuses for the next tile.
   The spool keeps the first stream error and throws it from `append` and `close`, so a
-  failed open or write is an error of that file, not of the whole run.
+  failed open or write is an error of that file, not of the whole run. `remove` waits for the
+  stream to close before it deletes the file, because the open is asynchronous.
 - **PX-I4.** The writer drops elements after PixelData, because they cannot follow new
   pixel data, and reports their tags. The writer drops the Extended Offset Table and its
   lengths (7FE0,0001/0002) of the source, whatever the caller passes, because they do not
@@ -171,6 +172,9 @@ rules:
   frames as Explicit VR Little Endian (`pixelLayoutSyntax` in
   `src/pixel/transferSyntaxes.js`). The writer does not deflate a dataset, so a rewritten
   file of this syntax becomes Explicit VR Little Endian.
+- **TC-I5.** A file that two inputs hold is transcoded once. With `-d`, a file whose output
+  path is already the output of another input fails with an error, and the first output
+  stays.
 
 ### `dcmjs wsiresize`
 
@@ -195,9 +199,13 @@ rules:
   DimensionIndexSequence, each tile also gets a FrameContentSequence item whose
   DimensionIndexValues are the 1-based index of the tile's value among the sorted distinct
   values of each dimension. A plane position or a frame content in the shared groups of the
-  base is never copied to a new level.
+  base is never copied to a new level. Only a group with its own Z offset gets the sparse
+  layout; in the same series, a group without a Z offset gets `TILED_FULL`. Every new level
+  sets TotalPixelMatrixFocalPlanes and NumberOfOpticalPaths to 1 (Type 1C for TILED_FULL).
 - **WR-I4.** Only 8-bit samples, one or three samples per pixel, and one focal plane and
-  one optical path in each image are supported. A concatenation of more than one part is
+  one optical path in each image are supported. The count attributes are optional for
+  TILED_SPARSE, so an image whose per-frame plane positions hold more than one Z offset, or
+  the same tile position twice, is refused too. A concatenation of more than one part is
   refused.
 - **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
   the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the plane position (from
@@ -212,7 +220,9 @@ rules:
   names `<SOPInstanceUID>.dcm` in place of `level-<n>.dcm`.
 - **WR-I8.** The new files replace the old ones by rename, the base last. If a rename
   fails, the command removes the new files that it renamed, so the old pyramid stays whole
-  (WR-U7).
+  (WR-U7). After the renames, each old level is deleted on its own. A level that cannot be
+  deleted (for example a locked file) is named in a warning on stderr, counted as a failure,
+  and the other levels are still deleted.
 - **WR-I5.** Partial edge tiles are filled with white: 255 for RGB, (255, 128, 128) for
   YBR_FULL. MONOCHROME2 is filled with black (0), and MONOCHROME1 with black (255).
 - **WR-I7.** The spool of out-of-order source frames is removed in the same `finally` as

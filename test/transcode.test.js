@@ -315,6 +315,32 @@ test("planar RGB and native YBR_FULL_422 are written as interleaved full-resolut
   expect((await header("ybr.dcm"))["00280004"].Value[0]).toBe("YBR_FULL");
 });
 
+// User experience: with -d, no file is done twice, and no output replaces another.
+test("a file given twice is transcoded once, and two inputs cannot write one output", async () => {
+  const study1 = path.join(tmpDir, "inputs", "study1");
+  const study2 = path.join(tmpDir, "inputs", "study2");
+  for (const dir of [study1, study2]) {
+    fs.mkdirSync(dir, { recursive: true });
+    writeBinarySeg(path.join(dir, "seg.dcm"));
+  }
+  const twice = await transcode([study1, path.join(study1, "seg.dcm")], {
+    to: "deflate",
+    directory: path.join(tmpDir, "inputs-once"),
+    json: true,
+    quiet: true,
+  });
+  expect(twice.code).toBe(0);
+  expect(JSON.parse(twice.text).files).toHaveLength(1);
+
+  const both = await transcode([study1, study2], {
+    to: "deflate",
+    directory: path.join(tmpDir, "inputs-both"),
+    quiet: true,
+  });
+  expect(both.code).toBe(1);
+  expect(both.err).toMatch(/is already the output of/);
+});
+
 // User experience: a header that cannot split the pixel data changes nothing.
 test("a native file without Rows fails, and the file stays as it was", async () => {
   const file = path.join(tmpDir, "no-rows.dcm");

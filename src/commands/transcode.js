@@ -131,13 +131,21 @@ export function parseTranscodeOptions(values) {
   };
 }
 
-/** [file, root] pairs for every DICOM file under the inputs. */
+/**
+ * [file, root] pairs for every DICOM file under the inputs. A file that two
+ * inputs hold is listed once, with the root of the first input.
+ */
 function collectInputs(positionals) {
   const pairs = [];
+  const seen = new Set();
   for (const input of positionals) {
     const root = fs.statSync(input).isDirectory() ? input : path.dirname(input);
     for (const file of discoverDicomFiles(input)) {
-      pairs.push([file, root]);
+      const resolved = path.resolve(file);
+      if (!seen.has(resolved)) {
+        seen.add(resolved);
+        pairs.push([file, root]);
+      }
     }
   }
   return pairs;
@@ -406,11 +414,21 @@ export async function runTranscode({
     quiet: values.quiet,
   });
 
+  const outputs = new Map();
   for (const [inputPath, root] of inputs) {
     const outputPath = outDir
       ? path.join(outDir, path.relative(root, inputPath))
       : inputPath;
     try {
+      // Two inputs with the same relative path would write one file.
+      const earlier = outputs.get(path.resolve(outputPath));
+      if (earlier) {
+        throw new Error(
+          `${outputPath} is already the output of ${earlier}; give the ` +
+            "inputs separate -d runs"
+        );
+      }
+      outputs.set(path.resolve(outputPath), inputPath);
       if (outDir && !dryRun) {
         fs.mkdirSync(path.dirname(outputPath), { recursive: true });
       }

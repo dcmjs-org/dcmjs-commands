@@ -286,10 +286,21 @@ async function findPyramids(dcmjs, positionals, unreadable) {
   return groups;
 }
 
+/**
+ * Refuses an image with more than one focal plane or optical path. The
+ * count attributes are optional for TILED_SPARSE, so the Z offsets of the
+ * per-frame plane positions are checked too.
+ */
 function checkPlanes({ dict, path: file }) {
+  const zOffsets = new Set(
+    (dict["52009230"]?.Value ?? []).map((item) =>
+      first(item["0048021A"]?.Value?.[0] ?? {}, "0040074A")
+    )
+  );
   if (
     Number(first(dict, "00480303") ?? 1) > 1 ||
-    Number(first(dict, "00480302") ?? 1) > 1
+    Number(first(dict, "00480302") ?? 1) > 1 ||
+    zOffsets.size > 1
   ) {
     throw new Error(
       `${file}: more than one focal plane or optical path in one image is ` +
@@ -395,6 +406,16 @@ function rasterOrder(position, frameCount) {
     ...position(i),
   }));
   const sorted = [...frames].sort((a, b) => a.y - b.y || a.x - b.x);
+  const twice = sorted.find(
+    (f, k) => k && f.x === sorted[k - 1].x && f.y === sorted[k - 1].y
+  );
+  if (twice) {
+    throw new Error(
+      `frames ${sorted[sorted.indexOf(twice) - 1].i + 1} and ${twice.i + 1} ` +
+        `are both at (${twice.x + 1}, ${twice.y + 1}); one tile for each ` +
+        "position is supported"
+    );
+  }
   return sorted.every((f, k) => f.i === k) ? undefined : sorted.map((f) => f.i);
 }
 
@@ -602,6 +623,9 @@ function levelDataset({
   }
   set(dict, "00200013", "IS", uids.instance);
   set(dict, "00209311", "CS", sparse ? "TILED_SPARSE" : "TILED_FULL");
+  // Type 1C for TILED_FULL; checkPlanes allows one of each per image.
+  set(dict, "00480303", "UL", 1);
+  set(dict, "00480302", "UL", 1);
   set(dict, "00280008", "IS", plan.frames);
   set(dict, "00280010", "US", tile);
   set(dict, "00280011", "US", tile);
@@ -666,7 +690,11 @@ async function resizeSeries({
   checkBase(base);
   checkPyramid(group);
   const shared = sharedGroups(base);
-  const geometry = group.multiPlane ? slideGeometry(base, shared) : undefined;
+  // Only a group with its own Z offset can give sparse levels their Z.
+  const geometry =
+    group.multiPlane && group.z !== ""
+      ? slideGeometry(base, shared)
+      : undefined;
   // Before any file exists, so an off-grid tile leaves nothing behind.
   const frameCount = Number(first(base.dict, "00280008") ?? 1);
   const position = tilePosition(base.dict);
@@ -872,10 +900,17 @@ async function resizeSeries({
       throw err;
     }
     if (inPlace) {
+      // The new pyramid is in place; a file that cannot go is reported,
+      // and the others are still deleted.
       report.deleted = [];
+      report.notDeleted = [];
       for (const level of others) {
-        fs.rmSync(level.path);
-        report.deleted.push(level.path);
+        try {
+          fs.rmSync(level.path);
+          report.deleted.push(level.path);
+        } catch (err) {
+          report.notDeleted.push({ path: level.path, error: err.message });
+        }
       }
     }
   } finally {
@@ -968,19 +1003,25 @@ export async function runWsiResize({
   });
   for (const group of groups) {
     try {
-      reports.push(
-        await resizeSeries({
-          dcmjs,
-          group,
-          options,
-          outDir: values.directory,
-          inPlace,
-          dryRun,
-          progress,
-          remapUid,
-          nextInstance,
-        })
-      );
+      const report = await resizeSeries({
+        dcmjs,
+        group,
+        options,
+        outDir: values.directory,
+        inPlace,
+        dryRun,
+        progress,
+        remapUid,
+        nextInstance,
+      });
+      reports.push(report);
+      for (const { path: file, error } of report.notDeleted ?? []) {
+        failed++;
+        stderr(
+          `dcmjs wsiresize: warning: ${file} is an old level of the rebuilt ` +
+            `pyramid and could not be deleted (${error}); delete it by hand`
+        );
+      }
     } catch (err) {
       failed++;
       reports.push({ series: group.uid, error: err.message });

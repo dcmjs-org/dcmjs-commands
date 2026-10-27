@@ -82,7 +82,13 @@ export class FrameSpool {
   }
 
   async remove() {
-    this.out.destroy();
+    // The open is asynchronous: wait for the stream to close, or a late
+    // open would create the file again after the unlink.
+    if (!this.out.closed) {
+      const closed = once(this.out, "close").catch(() => {});
+      this.out.destroy();
+      await closed;
+    }
     fs.rmSync(this.path, { force: true });
   }
 }

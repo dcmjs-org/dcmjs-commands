@@ -338,6 +338,33 @@ test("a truncated base fails, and leaves the directory as it was", async () => {
   expect(fs.readdirSync(dir).sort()).toEqual(before);
 });
 
+// User experience: an image that holds two focal planes is never merged into one.
+test("a sparse base with frames at two Z offsets is refused, and does not change", async () => {
+  const dir = path.join(tmpDir, "two-z-in-one");
+  const wsi = await writeSyntheticWsi(dcmjs, dir, { zOffset: 0 });
+  // Move frame 1 to another focal plane, without the optional plane count.
+  const bytes = fs.readFileSync(wsi.base.path);
+  const part10 = dcmjs.data.DicomMessage.readFile(
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)
+  );
+  delete part10.dict["00480303"];
+  part10.dict["52009230"].Value[0]["0048021A"].Value[0]["0040074A"].Value = [5];
+  fs.writeFileSync(
+    wsi.base.path,
+    Buffer.from(part10.write({ fragmentMultiframe: false }))
+  );
+  const before = fs.readFileSync(wsi.base.path);
+
+  const { code, err } = await wsiresize([dir], {
+    "in-place": true,
+    preset: "jxl-lossless",
+    quiet: true,
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/more than one focal plane/);
+  expect(fs.readFileSync(wsi.base.path).equals(before)).toBe(true);
+});
+
 // User experience: a messy input set does not stop or break the run.
 test("an unreadable file is skipped, and a file given twice is read once", async () => {
   const dir = path.join(tmpDir, "messy");
