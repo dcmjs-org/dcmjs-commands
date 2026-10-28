@@ -1082,7 +1082,7 @@ export async function runWsiResize({
   for (const file of unplaced) {
     stderr(
       `dcmjs wsiresize: warning: ${file}: the focal plane of this level is ` +
-        "unclear, so it is left as it is"
+        "unclear, so it is left as it is and a -d copy does not hold it"
     );
   }
   const reports = [];

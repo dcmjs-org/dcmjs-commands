@@ -251,9 +251,17 @@ test("focal planes stay apart, and levels without a plane position are placed on
     factor: "4",
     quiet: true,
   };
+  const sourceOne = await decodeLevel(one.base.path);
   expect((await wsiresize([single], opts)).code).toBe(0);
   // The half level joined the plane at Z 0 and was replaced.
   expect(fs.existsSync(one.half.path)).toBe(false);
+  // The sparse base keeps its SOPInstanceUID and every pixel.
+  const kept = await readPart10Header({ dcmjs, inputPath: one.base.path });
+  expect(kept.dict["00080018"].Value[0]).toBe(one.base.sop);
+  const rebuiltOne = await decodeLevel(one.base.path);
+  expect(Buffer.from(rebuiltOne.data).equals(Buffer.from(sourceOne.data))).toBe(
+    true
+  );
   expect(fs.readdirSync(single).filter((f) => f.endsWith(".dcm"))).toHaveLength(
     3
   );
