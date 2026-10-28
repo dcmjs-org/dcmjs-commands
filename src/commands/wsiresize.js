@@ -266,59 +266,51 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
   let groups = [...pyramids.values()];
   const area = ({ dict }) =>
     Number(first(dict, "00480006") ?? 0) * Number(first(dict, "00480007") ?? 0);
-  // A small level of one tile has a constant Z even in a focus-map slide.
-  // When only one Z group of an optical path holds the full-size level, a
-  // sibling group joins it if none of its level sizes is already in it; a
-  // repeated size is a real second plane, which stays apart.
-  for (const group of groups) {
-    const siblings = groups.filter(
-      (g) => g.uid === group.uid && g.paths === group.paths && g.levels.length
-    );
-    if (!group.levels.length || siblings[0] !== group) {
-      continue;
-    }
-    const largest = Math.max(...siblings.flatMap((g) => g.levels.map(area)));
-    const fullSize = siblings.filter((g) =>
-      g.levels.some((l) => area(l) === largest)
-    );
-    if (fullSize.length === 1 && siblings.length > 1) {
-      const [keep] = fullSize;
-      for (const g of siblings) {
-        const sizes = new Set(keep.levels.map(area));
-        if (g !== keep && !g.levels.some((l) => sizes.has(area(l)))) {
-          keep.levels.push(...g.levels);
-          g.levels = [];
-        }
-      }
-    }
-  }
-  // Levels without a Z key (TILED_FULL levels, focus maps) join the one
-  // focal plane of their optical path when none of their sizes is already
-  // in it. A loose group that holds a full-size level is a plane of its
-  // own. The other loose levels cannot be placed: they are reported and
-  // left as they are.
-  for (const loose of groups.filter((g) => g.z === "" && g.levels.length)) {
-    const planes = groups.filter(
+  const siblingsOf = (group) =>
+    groups.filter(
       (g) =>
-        g.uid === loose.uid &&
-        g.paths === loose.paths &&
-        g.z !== "" &&
+        g !== group &&
+        g.uid === group.uid &&
+        g.paths === group.paths &&
         g.levels.length
     );
-    if (!planes.length) {
+  const oneTile = (l) => Number(first(l.dict, "00280008") ?? 1) === 1;
+  // A constant Z is a plane, with one exception: a level of one tile has a
+  // constant Z even in a focus-map slide. A Z group of only one-tile levels
+  // joins the group of its optical path that holds the full-size level,
+  // when exactly one group holds it. No other Z group is ever merged.
+  for (const group of groups.filter((g) => g.z !== "" && g.levels.length)) {
+    if (!group.levels.every(oneTile)) {
       continue;
     }
-    const sizes = new Set(planes[0].levels.map(area));
-    if (planes.length === 1 && !loose.levels.some((l) => sizes.has(area(l)))) {
-      planes[0].levels.push(...loose.levels);
-      loose.levels = [];
+    const others = siblingsOf(group);
+    const largest = Math.max(0, ...others.flatMap((g) => g.levels.map(area)));
+    const holders = others.filter((g) =>
+      g.levels.some((l) => area(l) === largest)
+    );
+    if (holders.length === 1 && largest > Math.max(...group.levels.map(area))) {
+      holders[0].levels.push(...group.levels);
+      group.levels = [];
+    }
+  }
+  // Levels without a Z key (TILED_FULL levels, focus maps): a group that
+  // holds a level as large as any Z group's is a plane of its own. Else it
+  // joins the one Z group of its optical path; with several, its levels
+  // cannot be placed, and are reported and left as they are.
+  for (const loose of groups.filter((g) => g.z === "" && g.levels.length)) {
+    const planes = siblingsOf(loose).filter((g) => g.z !== "");
+    if (!planes.length) {
       continue;
     }
     const largest = Math.max(...planes.flatMap((g) => g.levels.map(area)));
     if (loose.levels.some((l) => area(l) >= largest)) {
       continue;
     }
-    unplaced.push(...loose.levels.map((l) => l.path));
+    if (planes.length === 1) {
+      planes[0].levels.push(...loose.levels);
+    } else {
+      unplaced.push(...loose.levels.map((l) => l.path));
+    }
     loose.levels = [];
   }
   for (const group of groups) {
@@ -336,8 +328,9 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
   for (const group of groups) {
     const series = groups.filter((g) => g.uid === group.uid);
     group.shared = series.length > 1;
-    group.multiPlane =
-      new Set(series.map((g) => g.z).filter((z) => z !== "")).size > 1;
+    // Several planes of one optical path: the Z groups keep their Z in a
+    // sparse layout (WR-I3).
+    group.multiPlane = series.filter((g) => g.paths === group.paths).length > 1;
   }
   return groups;
 }
@@ -691,7 +684,10 @@ function levelDataset({
     "DERIVED",
     "PRIMARY",
     "VOLUME",
-    plan.level ? "RESAMPLED" : "NONE"
+    // A base that was itself a reduced level stays RESAMPLED.
+    plan.level || base.dict["00080008"]?.Value?.[3] === "RESAMPLED"
+      ? "RESAMPLED"
+      : "NONE"
   );
   set(dict, "00080018", "UI", uids.sop);
   set(meta, "00020003", "UI", uids.sop);

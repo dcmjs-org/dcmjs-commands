@@ -83,7 +83,12 @@ async function writeLevel(
     Modality: "SM",
     PatientName: "TEST^WSI",
     PatientID: "WSI001",
-    ImageType: ["DERIVED", "PRIMARY", imageType, "NONE"],
+    ImageType: [
+      "DERIVED",
+      "PRIMARY",
+      imageType,
+      scale > 1 ? "RESAMPLED" : "NONE",
+    ],
     InstanceNumber: 1,
     Rows: tile,
     Columns: tile,

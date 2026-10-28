@@ -233,16 +233,18 @@ rules:
 - **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
   the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the plane position (from
   the shared groups, else from the frames when all frames share one Z offset; a focus map
-  gives no Z key). Groups join by level size: a level size that repeats is a second plane,
-  so two groups merge only when no size repeats.
-  - When one Z group of an optical path holds the full-size level, each sibling Z group whose
-    sizes are all new joins it. A one-tile level has a constant Z even in a focus-map slide,
-    and this rule puts it back in its pyramid.
-  - A group without a Z key joins the one Z group of its optical path when its sizes are all
-    new. If it holds a full-size level, it is a plane of its own and is rebuilt.
-  - Any other level cannot be placed: the command leaves it as it is, and names it in a
-    warning on stderr and in the `unplaced` list of `--json`. A plane group without a VOLUME
-    base is reported the same way, never dropped silently.
+  gives no Z key). The command never guesses a plane from level sizes or file order:
+  - A constant Z is a plane. The one exception is a Z group of only one-tile levels: a
+    one-tile level has a constant Z even in a focus-map slide, so the group joins the group
+    of its optical path that holds the full-size level, when exactly one group holds it.
+  - A group without a Z key that holds a level as large as any Z group's is a plane of its
+    own and is rebuilt. Otherwise it joins the one Z group of its optical path.
+  - With several Z groups, a level without a Z key cannot be placed: the command leaves it as
+    it is, and names it in a warning on stderr and in the `unplaced` list of `--json`. A
+    plane group without a VOLUME base is reported the same way, never dropped silently.
+  - When an optical path has more than one plane, the Z planes are written `TILED_SPARSE`
+    with their Z. A rebuilt base that was itself a reduced level keeps ImageType
+    `RESAMPLED`.
 
   LABEL and OVERVIEW images are not grouped. A file that two inputs hold is read once. A file whose header cannot be read
   is reported on stderr, counted as a failure, and skipped; the other series still run.
