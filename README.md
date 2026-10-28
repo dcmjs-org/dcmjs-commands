@@ -31,12 +31,12 @@ What you can do with them:
 
 Four bins ship with the package:
 
-| Bin          | Purpose                                                                                                                                              |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb — plus patient-access (SMART Imaging Access retrieval) |
-| `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                               |
-| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                   |
-| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                            |
+| Bin          | Purpose                                                                                                                                                                    |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb, transcode, wsiresize — plus patient-access (SMART Imaging Access retrieval) |
+| `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                                                     |
+| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                                         |
+| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                                                  |
 
 For a worked tour of every command with runnable examples, see
 [EXAMPLES.md](EXAMPLES.md). For where the tooling is headed (library-level
@@ -216,6 +216,65 @@ Patient; if it disagrees with the instance tags you get a warning (run
 `dcmjs filter --fhir-patient` first when the instances should match).
 `--fhir-encounter` embeds an Encounter and references it from
 `ImagingStudy.encounter`.
+
+### transcode
+
+Rewrite the pixel data of DICOM files in another transfer syntax, one
+frame at a time, so memory depends on the frame size, not the number of
+frames (uncompressed pixel data is held whole, up to 2 GiB). Files are replaced in place
+unless `-d` names an output directory. JPEG Baseline whole-slide images
+recompress losslessly to JPEG XL (`jxl-jpeg`, 1.2.840.10008.1.2.4.111),
+and `--to jpeg` gives back the same JPEG bytes. Lossy targets need
+`--lossy` and get a new SOPInstanceUID. `rle` and `deflate` are lossless,
+and are the targets for BINARY segmentations (Bits Allocated 1). The
+written PhotometricInterpretation always matches the written samples:
+native YBR_FULL_422 written as rle or deflate becomes YBR_FULL. The command prints instances,
+frames, header bytes and image bytes before and after. Progress goes to
+stderr: a line per large file and its frames, batches for small files;
+`-q` turns it off.
+
+```bash
+dcmjs transcode ./slides --to jxl-jpeg              # in place, lossless
+dcmjs transcode ./slides --to jpeg -d ./restored    # back to the JPEG frames
+dcmjs transcode ./ct --to jxl-lossless -d ./ct-jxl
+```
+
+`--new-series` writes copies that an archive takes as new data, to test
+re-uploads: new series and instance UIDs (references between the copies
+follow), SeriesNumber + 1000, SeriesDescription "… (copy N)" counting up
+for each copy of a copy, and the instance date/time of the run. It needs
+`-d`; `--to` is optional.
+
+```bash
+dcmjs transcode ./study --new-series -d ./copy-1
+dcmjs transcode ./copy-1 --new-series -d ./copy-2   # "(copy 2)"
+```
+
+### wsiresize
+
+Rebuild a whole-slide pyramid from its base level with a new tile size,
+level factor and codec. Presets: `jxl-high` (default, JPEG XL distance 1),
+`jxl-medium`, `jxl-low`, `jxl-lossless` — all 1024 x 1024 tiles, factor 4,
+progressive — and `jpeg-512`. `-d` writes a new series; `--in-place` keeps
+the base level's SOPInstanceUID and the SeriesInstanceUID, so references to
+the base level (for example bulk annotations) stay valid, and deletes the
+old lower levels. Each optical path and focal plane is its own pyramid, so
+other channels are never deleted. The files do not always tell which focal
+plane a level belongs to, so `--in-place` refuses an optical path with
+several focal planes, or with a level on an unclear plane; use `-d` for such
+a slide. With a lossy preset, `--in-place` still keeps the base
+SOPInstanceUID and prints a warning.
+
+```bash
+dcmjs wsiresize ./slide --dry-run                   # print the planned levels
+dcmjs wsiresize ./slide -d ./resized --preset jxl-medium
+dcmjs wsiresize ./slide --in-place --preset jxl-high --tile 512
+```
+
+Expect long runs on large slides: a 229079 x 98511 JPEG slide (5 levels,
+9.1 GB) took 15 h 10 min with `jxl-high` on one thread, and came out at
+4.3 GB (-52.5% image bytes). Sample times and sizes are in the
+[specification](docs/specs/transcode-and-wsiresize.md#measured-results).
 
 ### patient-access
 
