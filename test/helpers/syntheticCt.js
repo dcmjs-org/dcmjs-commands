@@ -1,25 +1,21 @@
 // test/helpers/syntheticCt.js
 //
-// Writes a small classic CT series for the multiframe tests: single-frame
-// slices of 16 x 16 signed 16-bit pixels, in a file order that is not the
-// slice order, plus an SR, a KO and a SEG that refer to the slices.
+// Writes a small classic CT (or multi-echo MR) series for the multiframe
+// tests: single-frame slices of 16 x 16 signed 16-bit pixels, in a file
+// order that is not the slice order.
 
 import fs from "node:fs";
 import path from "node:path";
 
 const CT = "1.2.840.10008.5.1.4.1.1.2";
-const SR = "1.2.840.10008.5.1.4.1.1.88.33";
-const KO = "1.2.840.10008.5.1.4.1.1.88.59";
-const SEG = "1.2.840.10008.5.1.4.1.1.66.4";
+const MR = "1.2.840.10008.5.1.4.1.1.4";
 const EXPLICIT_LE = "1.2.840.10008.1.2.1";
 const SIZE = 16;
 
 function write(dcmjs, file, dataset, pixelData) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
   const dict = DicomMetaDictionary.denaturalizeDataset(dataset);
-  if (pixelData) {
-    dict["7FE00010"] = pixelData;
-  }
+  dict["7FE00010"] = pixelData;
   const meta = DicomMetaDictionary.denaturalizeDataset({
     FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
     MediaStorageSOPClassUID: dataset.SOPClassUID,
@@ -33,75 +29,88 @@ function write(dcmjs, file, dataset, pixelData) {
   fs.writeFileSync(file, Buffer.from(part10.write()));
 }
 
-/** The pixels of slice `z`: z * 100 plus the pixel index. */
-export function slicePixels(z) {
+/** The pixels of slice `z` of `echo`: echo * 1000 + z * 100 + the index. */
+export function slicePixels(z, echo = 0) {
   const pixels = new Int16Array(SIZE * SIZE);
-  pixels.forEach((_, i) => (pixels[i] = z * 100 + i));
+  pixels.forEach((_, i) => (pixels[i] = echo * 1000 + z * 100 + i));
   return pixels;
 }
 
-const ref = (classUid, sop) => ({
-  ReferencedSOPClassUID: classUid,
-  ReferencedSOPInstanceUID: sop,
-});
-
 /**
- * Writes the series into `dir`. The slices are at z = 0, 2, 4, ... and
- * InstanceNumber counts down from the first slice. `photometric` labels
- * slice index 1 (to test a refusal). With `references`, also writes
- * `refs/sr.dcm`, `refs/ko.dcm` and `refs/seg.dcm` in a second series.
+ * Writes the series into `dir`. The slices are at z = 0, 2, 4, ...
+ * `photometric` labels slice index 1 (to test a refusal).
  *
- * @returns {{ study, series, slices: Array<{ path, sop, z }>, sr, ko, seg }}
- *   `slices` is in z order.
+ * With `echoes` > 1, the series is MR, with each echo at every position.
+ * The InstanceNumber interleaves the echoes, and at every second position
+ * echo 2 has the lower InstanceNumber, so that only EchoNumbers gives the
+ * order of the echoes. Otherwise the series is CT and the InstanceNumber
+ * counts down from the first slice.
+ *
+ * @returns {{ study, series, frameOfReference,
+ *   slices: Array<{ path, sop, z, echo }> }} `slices` is in echo order,
+ *   then in z order.
  */
 export function writeSyntheticCt(
   dcmjs,
   dir,
-  { count = 4, photometric, references = true } = {}
+  { count = 4, photometric, echoes = 1 } = {}
 ) {
   const { uid } = dcmjs.data.DicomMetaDictionary;
   const study = uid();
   const series = uid();
   const frameOfReference = uid();
-  // The file names follow InstanceNumber, which runs against z.
-  const slices = Array.from({ length: count }, (_, i) => ({
-    sop: uid(),
-    z: i * 2,
-    path: path.join(dir, `slice-${count - i}.dcm`),
-  }));
-  const common = {
-    PatientName: "TEST^CT",
-    PatientID: "CT001",
-    PatientBirthDate: "19700101",
-    PatientSex: "O",
-    StudyInstanceUID: study,
-    StudyDate: "20260101",
-    StudyTime: "080000",
-    AccessionNumber: "A1",
-    ReferringPhysicianName: "",
-    StudyID: "1",
-    Manufacturer: "Test",
-  };
+  const mr = echoes > 1;
+  const slices = [];
+  for (let echo = 1; echo <= echoes; echo++) {
+    for (let i = 0; i < count; i++) {
+      const swap = mr && i % 2 === 1 ? echoes - echo : echo - 1;
+      const number = mr ? i * echoes + swap + 1 : count - i;
+      slices.push({
+        sop: uid(),
+        z: i * 2,
+        echo: mr ? echo : 0,
+        number,
+        path: path.join(dir, `slice-${number}.dcm`),
+      });
+    }
+  }
   for (const [i, slice] of slices.entries()) {
     write(
       dcmjs,
       slice.path,
       {
-        ...common,
-        SOPClassUID: CT,
+        PatientName: "TEST^CT",
+        PatientID: "CT001",
+        PatientBirthDate: "19700101",
+        PatientSex: "O",
+        StudyInstanceUID: study,
+        StudyDate: "20260101",
+        StudyTime: "080000",
+        AccessionNumber: "A1",
+        ReferringPhysicianName: "",
+        StudyID: "1",
+        Manufacturer: "Test",
+        SOPClassUID: mr ? MR : CT,
         SOPInstanceUID: slice.sop,
         SeriesInstanceUID: series,
+        SeriesDescription: mr ? "Dual echo" : "Chest",
         FrameOfReferenceUID: frameOfReference,
         PositionReferenceIndicator: "",
-        Modality: "CT",
+        Modality: mr ? "MR" : "CT",
         SeriesNumber: 2,
-        InstanceNumber: count - i,
-        ImageType: ["ORIGINAL", "PRIMARY", "AXIAL"],
+        InstanceNumber: slice.number,
+        ImageType: ["ORIGINAL", "PRIMARY", mr ? "OTHER" : "AXIAL"],
         ContentDate: "20260101",
         ContentTime: `0800${String(10 + i).padStart(2, "0")}`,
         AcquisitionNumber: 1,
         BodyPartExamined: "CHEST",
-        KVP: 120,
+        ...(mr
+          ? {
+              EchoNumbers: slice.echo,
+              EchoTime: slice.echo * 2.4,
+              ScanningSequence: "GR",
+            }
+          : { KVP: 120 }),
         SliceLocation: slice.z,
         ImagePositionPatient: [-4, -4, slice.z],
         ImageOrientationPatient: [1, 0, 0, 0, 1, 0],
@@ -113,109 +122,17 @@ export function writeSyntheticCt(
         PhotometricInterpretation:
           i === 1 && photometric ? photometric : "MONOCHROME2",
         BitsAllocated: 16,
-        BitsStored: 12,
-        HighBit: 11,
+        BitsStored: 16,
+        HighBit: 15,
         PixelRepresentation: 1,
-        RescaleIntercept: -1024,
-        RescaleSlope: 1,
-        RescaleType: "HU",
+        ...(mr
+          ? {}
+          : { RescaleIntercept: -1024, RescaleSlope: 1, RescaleType: "HU" }),
         WindowCenter: 40,
         WindowWidth: 400,
       },
-      { vr: "OW", Value: [slicePixels(slice.z).buffer] }
+      { vr: "OW", Value: [slicePixels(slice.z, slice.echo).buffer] }
     );
   }
-  const result = { study, series, frameOfReference, slices };
-  if (!references) {
-    return result;
-  }
-
-  const refSeries = uid();
-  const evidence = [
-    {
-      StudyInstanceUID: study,
-      ReferencedSeriesSequence: [
-        {
-          SeriesInstanceUID: series,
-          ReferencedSOPSequence: slices.map((s) => ref(CT, s.sop)),
-        },
-      ],
-    },
-  ];
-  const image = (s) => ({
-    RelationshipType: "CONTAINS",
-    ValueType: "IMAGE",
-    ReferencedSOPSequence: [ref(CT, s.sop)],
-  });
-  const document = (classUid, sop, number, content) => ({
-    ...common,
-    SOPClassUID: classUid,
-    SOPInstanceUID: sop,
-    SeriesInstanceUID: refSeries,
-    Modality: classUid === KO ? "KO" : "SR",
-    SeriesNumber: 10,
-    InstanceNumber: number,
-    ValueType: "CONTAINER",
-    ContinuityOfContent: "SEPARATE",
-    ConceptNameCodeSequence: [
-      {
-        CodeValue: "113000",
-        CodingSchemeDesignator: "DCM",
-        CodeMeaning: "Of Interest",
-      },
-    ],
-    CurrentRequestedProcedureEvidenceSequence: evidence,
-    ContentSequence: content,
-  });
-  result.sr = { sop: uid(), path: path.join(dir, "refs", "sr.dcm") };
-  write(
-    dcmjs,
-    result.sr.path,
-    document(SR, result.sr.sop, 1, [image(slices[1])])
-  );
-  result.ko = { sop: uid(), path: path.join(dir, "refs", "ko.dcm") };
-  write(
-    dcmjs,
-    result.ko.path,
-    document(KO, result.ko.sop, 2, [image(slices[0]), image(slices[2])])
-  );
-
-  result.seg = { sop: uid(), path: path.join(dir, "refs", "seg.dcm") };
-  write(
-    dcmjs,
-    result.seg.path,
-    {
-      ...common,
-      SOPClassUID: SEG,
-      SOPInstanceUID: result.seg.sop,
-      SeriesInstanceUID: refSeries,
-      FrameOfReferenceUID: frameOfReference,
-      Modality: "SEG",
-      SeriesNumber: 10,
-      InstanceNumber: 3,
-      ReferencedSeriesSequence: [
-        {
-          SeriesInstanceUID: series,
-          ReferencedInstanceSequence: slices.map((s) => ref(CT, s.sop)),
-        },
-      ],
-      PerFrameFunctionalGroupsSequence: [slices[1], slices[2]].map((s) => ({
-        DerivationImageSequence: [{ SourceImageSequence: [ref(CT, s.sop)] }],
-      })),
-      NumberOfFrames: 2,
-      Rows: SIZE,
-      Columns: SIZE,
-      SamplesPerPixel: 1,
-      PhotometricInterpretation: "MONOCHROME2",
-      BitsAllocated: 1,
-      BitsStored: 1,
-      HighBit: 0,
-      PixelRepresentation: 0,
-    },
-    {
-      vr: "OB",
-      Value: [new Uint8Array((SIZE * SIZE * 2) / 8).fill(0x0f).buffer],
-    }
-  );
-  return result;
+  return { study, series, frameOfReference, slices };
 }

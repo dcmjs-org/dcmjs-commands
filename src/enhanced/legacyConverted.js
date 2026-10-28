@@ -108,10 +108,7 @@ const T = Object.fromEntries(
     "ContributingEquipmentSequence",
     "ReferencedSOPClassUID",
     "ReferencedSOPInstanceUID",
-    "ReferencedFrameNumber",
-    "ReferencedSOPSequence",
-    "ReferencedSeriesSequence",
-    "ReferencedInstanceSequence",
+    "EchoNumbers",
   ].map((keyword) => [keyword, tagOf(keyword)])
 );
 
@@ -363,6 +360,9 @@ const isStructural = (tag) =>
   tag.startsWith("0002") || tag.endsWith("0000") || tag >= "7FE00000";
 
 const numbers = (dict, tag) => dict[tag]?.Value?.map(Number);
+/** The values of a string element; a value joined with "\" is split. */
+const strings = (dict, tag) =>
+  (dict[tag]?.Value ?? []).flatMap((v) => String(v ?? "").split("\\"));
 
 /** Why this classic image cannot be converted, or undefined. */
 function refusal(dict, transferSyntaxUID) {
@@ -404,19 +404,32 @@ const PIXEL_KEY = [
   "SamplesPerPixel",
 ].map(tagOf);
 
+/** The values of the `layout` option of `groupInstances`. */
+export const LAYOUTS = ["split", "grouped", "interleaved"];
+
 /**
  * Groups classic CT, MR and PET images into the stacks that become one
- * Legacy Converted Enhanced instance each: one series, SOP class, frame of
- * reference, transfer syntax, pixel layout and orientation (to 1e-4).
+ * Legacy Converted Enhanced instance each. A group has one series, SOP
+ * class, frame of reference, transfer syntax, pixel layout and orientation
+ * (to 1e-4). A group with more than one volume (echoes, or Dixon types, see
+ * `volumesOf`) becomes:
+ * - `split`: one stack for each volume;
+ * - `grouped`: one stack, volume after volume, StackID = volume number;
+ * - `interleaved`: one stack, by position, with the volumes in their order
+ *   at each position, StackID = volume number.
+ * A stack of one image is skipped.
  *
  * @param {Array<{id: string, dict: object, transferSyntaxUID: string}>}
  *   instances
- * @returns {{ stacks: Array<{ seriesUID, sourceClass, target, transferSyntaxUID,
- *   instances, positions, isStack }>, refused: Array<{ id, reason }> }}
- *   `instances` of each stack are in frame order. `isStack` is true when
- *   every frame has its own position along the slice normal.
+ * @param {{ layout?: "split"|"grouped"|"interleaved" }} [options]
+ * @returns {{ stacks: Array<{ seriesUID, sourceClass, target,
+ *   transferSyntaxUID, layout, volumes, instances, frames, isStack }>,
+ *   refused: Array<{ id, reason }>, skipped: Array<{ id, reason }> }}
+ *   `instances` of each stack are in frame order, and `frames` gives the
+ *   StackID and InStackPositionNumber of each. `isStack` is true when every
+ *   frame of a volume has its own position along the slice normal.
  */
-export function groupInstances(instances) {
+export function groupInstances(instances, { layout = "split" } = {}) {
   const groups = new Map();
   const refused = [];
   for (const instance of instances) {
@@ -451,40 +464,111 @@ export function groupInstances(instances) {
     groups.get(key).instances.push(instance);
   }
 
-  const stacks = [...groups.values()].map((group) => {
-    const position = ({ dict }) => {
-      const p = numbers(dict, T.ImagePositionPatient);
-      return (
-        p[0] * group.normal[0] + p[1] * group.normal[1] + p[2] * group.normal[2]
-      );
-    };
-    const rank = (dict) => [
-      Number(first(dict, T.AcquisitionNumber) ?? 0),
-      Number(first(dict, T.InstanceNumber) ?? 0),
-      String(first(dict, T.SOPInstanceUID)),
-    ];
-    const sorted = group.instances
-      .map((instance) => ({ instance, at: position(instance) }))
-      .sort((a, b) => {
-        if (Math.abs(a.at - b.at) > 1e-4) {
-          return a.at - b.at;
-        }
-        const [ra, rb] = [rank(a.instance.dict), rank(b.instance.dict)];
-        return ra[0] - rb[0] || ra[1] - rb[1] || ra[2].localeCompare(rb[2]);
+  const stacks = [];
+  const skipped = [];
+  for (const group of groups.values()) {
+    const volumes = volumesOf(group);
+    const parts =
+      layout === "split" ? volumes.map((volume) => [volume]) : [volumes];
+    for (const part of parts) {
+      const frames =
+        layout === "interleaved" ? interleave(part) : part.flatMap(framesOf);
+      if (frames.length < 2) {
+        skipped.push(
+          ...frames.map((f) => ({
+            id: f.instance.id,
+            reason: "a stack of one image is not converted",
+          }))
+        );
+        continue;
+      }
+      stacks.push({
+        seriesUID: group.seriesUID,
+        sourceClass: group.sourceClass,
+        target: group.target,
+        transferSyntaxUID: group.transferSyntaxUID,
+        layout: part.length > 1 ? layout : "split",
+        volumes: part.map((v) => v.label),
+        instances: frames.map((f) => f.instance),
+        frames: frames.map((f) => ({
+          stackId: part.length > 1 ? f.stackId : "1",
+          at: f.index + 1,
+        })),
+        isStack: part.every((v) => v.isStack),
       });
-    const isStack = sorted.every(
-      (s, i) => !i || Math.abs(s.at - sorted[i - 1].at) > 1e-4
+    }
+  }
+  return { stacks, refused, skipped };
+}
+
+/**
+ * The volumes of one group: the images with one EchoNumbers value and one
+ * ImageType from value 4 on (for example FAT or IN_PHASE of a Dixon
+ * series), ordered by echo and then by type. The images of a volume are in
+ * slice order along the normal; images at one position keep the order of
+ * AcquisitionNumber, InstanceNumber and SOPInstanceUID.
+ */
+function volumesOf(group) {
+  const position = ({ dict }) => {
+    const p = numbers(dict, T.ImagePositionPatient);
+    return (
+      p[0] * group.normal[0] + p[1] * group.normal[1] + p[2] * group.normal[2]
     );
+  };
+  const rank = (dict) => [
+    Number(first(dict, T.AcquisitionNumber) ?? 0),
+    Number(first(dict, T.InstanceNumber) ?? 0),
+    String(first(dict, T.SOPInstanceUID)),
+  ];
+  const byKey = new Map();
+  for (const instance of group.instances) {
+    const echo = Number(first(instance.dict, T.EchoNumbers) ?? 0);
+    const type = strings(instance.dict, T.ImageType).slice(3).join("\\");
+    const key = JSON.stringify([echo, type]);
+    if (!byKey.has(key)) {
+      byKey.set(key, { echo, type, instances: [] });
+    }
+    byKey.get(key).instances.push({ instance, at: position(instance) });
+  }
+  const volumes = [...byKey.values()].sort(
+    (a, b) => a.echo - b.echo || a.type.localeCompare(b.type)
+  );
+  return volumes.map((volume, v) => {
+    const sorted = volume.instances.sort((a, b) => {
+      if (Math.abs(a.at - b.at) > 1e-4) {
+        return a.at - b.at;
+      }
+      const [ra, rb] = [rank(a.instance.dict), rank(b.instance.dict)];
+      return ra[0] - rb[0] || ra[1] - rb[1] || ra[2].localeCompare(rb[2]);
+    });
     return {
-      seriesUID: group.seriesUID,
-      sourceClass: group.sourceClass,
-      target: group.target,
-      transferSyntaxUID: group.transferSyntaxUID,
-      instances: sorted.map((s) => s.instance),
-      isStack,
+      label:
+        volumes.length > 1
+          ? [volume.echo && `echo ${volume.echo}`, volume.type]
+              .filter(Boolean)
+              .join(" ")
+          : "",
+      stackId: String(v + 1),
+      isStack: sorted.every(
+        (s, i) => !i || Math.abs(s.at - sorted[i - 1].at) > 1e-4
+      ),
+      sorted,
     };
   });
-  return { stacks, refused };
+}
+
+/** The frames of one volume, in slice order. */
+const framesOf = (volume) =>
+  volume.sorted.map((s, index) => ({ ...s, index, stackId: volume.stackId }));
+
+/** The frames of all volumes by position, then in the volume order. */
+function interleave(volumes) {
+  return volumes
+    .flatMap(framesOf)
+    .map((frame, order) => ({ ...frame, order }))
+    .sort((a, b) =>
+      Math.abs(a.at - b.at) > 1e-4 ? a.at - b.at : a.order - b.order
+    );
 }
 
 /**
@@ -578,15 +662,16 @@ function frameMacros(dict, target) {
     });
   }
 
-  const imageType = dict[T.ImageType]?.Value ?? [];
+  const imageType = strings(dict, T.ImageType);
   macros[target.frameType] = item({
     FrameType: el(
       "FrameType",
       imageType[0] ?? "ORIGINAL",
       imageType[1] ?? "PRIMARY",
       imageType[2] ?? "",
-      // Value 4 may be empty in a Legacy Converted image (C.8.16.1).
-      ""
+      // Value 4 may be empty in a Legacy Converted image (C.8.16.1); a
+      // source value (FAT, IN_PHASE, ...) names the volume of the frame.
+      imageType[3] ?? ""
     ),
     PixelPresentation: el("PixelPresentation", "MONOCHROME"),
     VolumetricProperties: el("VolumetricProperties", "VOLUME"),
@@ -645,16 +730,17 @@ function frameMacros(dict, target) {
 const withScheme = ([value, meaning]) => [value, "SCT", meaning];
 
 /**
- * The ReferencedImageEvidenceSequence of the images that the frames refer
- * to (Type 1C in the Enhanced CT, MR and PET Image Modules). A classic
- * reference names no series, so `locate(sop)` gives `{ study, series }`;
- * a reference that it cannot place is returned in `unlocated`.
+ * The evidence sequence of the images that the frames refer to through
+ * `sequenceTag`: ReferencedImageSequence gives ReferencedImageEvidenceSequence
+ * and SourceImageSequence gives SourceImageEvidenceSequence (both Type 1C
+ * in the Enhanced CT, MR and PET Image Modules). A classic reference names
+ * no series, so `locate(sop)` gives `{ study, series }`; a reference that it
+ * cannot place is added to `unlocated`.
  */
-function referencedImageEvidence(dicts, locate) {
+function imageEvidence(dicts, sequenceTag, locate, unlocated) {
   const studies = new Map();
-  const unlocated = new Set();
   for (const dict of dicts) {
-    for (const reference of dict[T.ReferencedImageSequence]?.Value ?? []) {
+    for (const reference of dict[sequenceTag]?.Value ?? []) {
       const sop = first(reference, T.ReferencedSOPInstanceUID);
       const where = sop && locate?.(sop);
       if (!where) {
@@ -695,7 +781,7 @@ function referencedImageEvidence(dicts, locate) {
       ),
     })
   );
-  return { evidence: { vr: "SQ", Value: evidence }, unlocated: [...unlocated] };
+  return { vr: "SQ", Value: evidence };
 }
 
 /** Copies `tag` and, for a private element, its Private Creator. */
@@ -805,14 +891,29 @@ export function buildLegacyConverted({
     shared[tagOf("UnassignedSharedConvertedAttributesSequence")] =
       sq(sharedUnassigned);
   }
-  const { evidence, unlocated } = referencedImageEvidence(dicts, locate);
-  if (evidence.Value.length) {
-    dict[tagOf("ReferencedImageEvidenceSequence")] = evidence;
+  const unlocated = new Set();
+  for (const [sequence, evidenceSequence] of [
+    ["ReferencedImageSequence", "ReferencedImageEvidenceSequence"],
+    ["SourceImageSequence", "SourceImageEvidenceSequence"],
+  ]) {
+    const evidence = imageEvidence(dicts, tagOf(sequence), locate, unlocated);
+    if (evidence.Value.length) {
+      dict[tagOf(evidenceSequence)] = evidence;
+    }
   }
 
   const dimensionOrganization = stack.isStack ? uid() : undefined;
+  // The first dimension varies slowest in the frame order.
+  const dimensions =
+    stack.volumes.length < 2
+      ? ["InStackPositionNumber"]
+      : stack.layout === "grouped"
+        ? ["StackID", "InStackPositionNumber"]
+        : ["InStackPositionNumber", "StackID"];
   dicts.forEach((d, i) => {
     const acquired = dateTime(d);
+    const { stackId, at } = stack.frames[i];
+    const index = { StackID: Number(stackId), InStackPositionNumber: at };
     perFrame[i][tagOf("FrameContentSequence")] = sq(
       item({
         FrameAcquisitionNumber:
@@ -826,12 +927,12 @@ export function buildLegacyConverted({
           acquired && el("FrameReferenceDateTime", acquired),
         FrameAcquisitionDateTime:
           acquired && el("FrameAcquisitionDateTime", acquired),
-        StackID: stack.isStack ? el("StackID", "1") : undefined,
+        StackID: stack.isStack ? el("StackID", stackId) : undefined,
         InStackPositionNumber: stack.isStack
-          ? el("InStackPositionNumber", i + 1)
+          ? el("InStackPositionNumber", at)
           : undefined,
         DimensionIndexValues: stack.isStack
-          ? el("DimensionIndexValues", i + 1)
+          ? el("DimensionIndexValues", ...dimensions.map((k) => index[k]))
           : undefined,
       })
     );
@@ -873,33 +974,39 @@ export function buildLegacyConverted({
             ),
           })
         ),
-        DimensionOrganizationType: el("DimensionOrganizationType", "3D"),
+        // Volumes at the same positions are not one 3D volume.
+        DimensionOrganizationType:
+          dimensions.length === 1
+            ? el("DimensionOrganizationType", "3D")
+            : undefined,
         DimensionIndexSequence: sq(
-          item({
-            DimensionOrganizationUID: el(
-              "DimensionOrganizationUID",
-              dimensionOrganization
-            ),
-            DimensionIndexPointer: el(
-              "DimensionIndexPointer",
-              pointer("InStackPositionNumber")
-            ),
-            FunctionalGroupPointer: el(
-              "FunctionalGroupPointer",
-              pointer("FrameContentSequence")
-            ),
-            DimensionDescriptionLabel: el(
-              "DimensionDescriptionLabel",
-              "In-Stack Position"
-            ),
-          })
+          ...dimensions.map((keyword) =>
+            item({
+              DimensionOrganizationUID: el(
+                "DimensionOrganizationUID",
+                dimensionOrganization
+              ),
+              DimensionIndexPointer: el(
+                "DimensionIndexPointer",
+                pointer(keyword)
+              ),
+              FunctionalGroupPointer: el(
+                "FunctionalGroupPointer",
+                pointer("FrameContentSequence")
+              ),
+              DimensionDescriptionLabel: el(
+                "DimensionDescriptionLabel",
+                keyword === "StackID" ? "Stack ID" : "In-Stack Position"
+              ),
+            })
+          )
         ),
       })
     );
   }
 
   // The top level of the new instance.
-  const types = dicts.map((d) => d[T.ImageType]?.Value ?? []);
+  const types = dicts.map((d) => strings(d, T.ImageType));
   const imageTypeValue = (i, fallback) => {
     const values = new Set(types.map((t) => t[i] ?? fallback));
     return values.size === 1 ? [...values][0] : "MIXED";
@@ -948,7 +1055,7 @@ export function buildLegacyConverted({
         imageTypeValue(0, "ORIGINAL"),
         imageTypeValue(1, "PRIMARY"),
         imageTypeValue(2, ""),
-        ""
+        imageTypeValue(3, "")
       ),
       PixelPresentation: el("PixelPresentation", "MONOCHROME"),
       VolumetricProperties: el("VolumetricProperties", "VOLUME"),
@@ -975,118 +1082,9 @@ export function buildLegacyConverted({
   const sorted = Object.fromEntries(
     Object.entries(dict).sort(([a], [b]) => a.localeCompare(b))
   );
-  return { dict: sorted, dropped: [...dropped].sort(), unlocated };
-}
-
-const CONVERSION_SOURCE = tagOf("ConversionSourceAttributesSequence");
-
-/** True when `dict` holds a ReferencedSOPInstanceUID that `refs` maps. */
-export function hasReferences(dict, refs) {
-  for (const [tag, element] of Object.entries(dict)) {
-    if (tag === T.ReferencedSOPInstanceUID && refs.has(element?.Value?.[0])) {
-      return true;
-    }
-    if (
-      element?.vr === "SQ" &&
-      tag !== CONVERSION_SOURCE &&
-      element.Value?.some((i) => i && hasReferences(i, refs))
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Points the references of `dict` to the converted instances, in place.
- * `refs` maps each classic SOPInstanceUID to `{ sop, sopClass, frame }`.
- *
- * Every item with a mapped ReferencedSOPInstanceUID gets the new SOP
- * instance and class. Where the Image SOP Instance Reference Macro applies,
- * the item also gets ReferencedFrameNumber, and the items of one sequence
- * that now differ only in the frame merge into one item with all frames
- * (for example the ReferencedImageSequence of a presentation state).
- * The instance lists of the Hierarchical SOP Instance Reference Macro
- * (ReferencedSOPSequence in a ReferencedSeriesSequence item) and of the
- * Series and Instance Reference Macro (ReferencedInstanceSequence) hold no
- * frame numbers, so there the duplicates are removed.
- *
- * @returns {number} the number of references changed
- */
-export function rewriteReferences(dict, refs, inSeriesItem = false) {
-  let changed = 0;
-  for (const [tag, element] of Object.entries(dict)) {
-    // The conversion source names the classic image on purpose.
-    if (
-      element?.vr !== "SQ" ||
-      !element.Value?.length ||
-      tag === CONVERSION_SOURCE
-    ) {
-      continue;
-    }
-    for (const child of element.Value) {
-      if (child) {
-        changed += rewriteReferences(
-          child,
-          refs,
-          tag === T.ReferencedSeriesSequence
-        );
-      }
-    }
-    const instanceOnly =
-      tag === T.ReferencedInstanceSequence ||
-      (tag === T.ReferencedSOPSequence && inSeriesItem);
-    let hits = 0;
-    for (const child of element.Value) {
-      const ref = refs.get(first(child, T.ReferencedSOPInstanceUID));
-      if (!ref) {
-        continue;
-      }
-      hits++;
-      child[T.ReferencedSOPClassUID] = { vr: "UI", Value: [ref.sopClass] };
-      child[T.ReferencedSOPInstanceUID] = { vr: "UI", Value: [ref.sop] };
-      if (instanceOnly) {
-        delete child[T.ReferencedFrameNumber];
-      } else {
-        child[T.ReferencedFrameNumber] = { vr: "IS", Value: [ref.frame] };
-      }
-    }
-    if (hits) {
-      changed += hits;
-      element.Value = mergeItems(element.Value);
-    }
-  }
-  return changed;
-}
-
-/** Merges the reference items that differ only in their frame numbers. */
-function mergeItems(items) {
-  const merged = [];
-  const byKey = new Map();
-  for (const child of items) {
-    if (!child?.[T.ReferencedSOPInstanceUID]) {
-      merged.push(child);
-      continue;
-    }
-    const rest = { ...child };
-    delete rest[T.ReferencedFrameNumber];
-    const key = JSON.stringify(rest, binaryReplacer("base64"));
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, child);
-      merged.push(child);
-      continue;
-    }
-    const frames = [
-      ...(existing[T.ReferencedFrameNumber]?.Value ?? []),
-      ...(child[T.ReferencedFrameNumber]?.Value ?? []),
-    ].map(Number);
-    if (frames.length) {
-      existing[T.ReferencedFrameNumber] = {
-        vr: "IS",
-        Value: [...new Set(frames)].sort((a, b) => a - b),
-      };
-    }
-  }
-  return merged;
+  return {
+    dict: sorted,
+    dropped: [...dropped].sort(),
+    unlocated: [...unlocated],
+  };
 }

@@ -190,6 +190,8 @@ const COMMANDS = {
     options: {
       directory: { type: "string", short: "d" },
       "in-place": { type: "boolean", default: false },
+      "new-series": { type: "boolean", default: false },
+      layout: { type: "string" },
       study: { type: "string", short: "S", multiple: true },
       series: { type: "string", multiple: true },
       "dry-run": { type: "boolean", default: false },
