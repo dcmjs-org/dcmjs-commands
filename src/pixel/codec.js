@@ -166,7 +166,11 @@ export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
     // A 16- or 32-bit view needs an offset that is a multiple of the sample
     // size, as the fresh buffer of the codec's decoder had.
     const sampleBytes = Math.ceil(imageInfo.bitsAllocated / 8);
-    const aligned = frame.byteOffset % sampleBytes ? frame.slice() : frame;
+    // Uint8Array's slice copies; a Node Buffer's slice is only a view.
+    const aligned =
+      frame.byteOffset % sampleBytes
+        ? Uint8Array.prototype.slice.call(frame)
+        : frame;
     return nativeToInterleaved(aligned, imageInfo);
   }
   if (imageInfo.bitsAllocated === 1) {

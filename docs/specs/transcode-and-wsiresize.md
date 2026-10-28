@@ -233,21 +233,24 @@ rules:
 - **WR-I6.** Pyramids are grouped by SeriesInstanceUID, the OpticalPathIdentifier values of
   the OpticalPathSequence, and the ZOffsetInSlideCoordinateSystem of the plane position (from
   the shared groups, else from the frames when all frames share one Z offset; a focus map
-  gives no Z key). A level without a Z key joins the one focal plane of its optical path.
-  When the optical path has several focal planes, such a level cannot be placed: the command
-  leaves it as it is and names it on stderr. A full-size level that cannot be placed is a
-  plane that is not rebuilt, so it is an error and counts as a failure; a smaller one is a
-  warning. A plane group without a VOLUME base is reported the same way, never dropped
-  silently. Focal planes are told apart by the full-size levels only: when the full-size
-  levels of an optical path do not have distinct Z keys, all its levels are one pyramid,
-  because a small level of one tile has a constant Z even in a focus-map slide. LABEL and
-  OVERVIEW images are
-  not grouped. A file that two inputs hold is read once. A file whose header cannot be read
+  gives no Z key). Groups join by level size: a level size that repeats is a second plane,
+  so two groups merge only when no size repeats.
+  - When one Z group of an optical path holds the full-size level, each sibling Z group whose
+    sizes are all new joins it. A one-tile level has a constant Z even in a focus-map slide,
+    and this rule puts it back in its pyramid.
+  - A group without a Z key joins the one Z group of its optical path when its sizes are all
+    new. If it holds a full-size level, it is a plane of its own and is rebuilt.
+  - Any other level cannot be placed: the command leaves it as it is, and names it in a
+    warning on stderr and in the `unplaced` list of `--json`. A plane group without a VOLUME
+    base is reported the same way, never dropped silently.
+
+  LABEL and OVERVIEW images are not grouped. A file that two inputs hold is read once. A file whose header cannot be read
   is reported on stderr, counted as a failure, and skipped; the other series still run.
   `transcode --new-series` skips such a file in its UID plan, and the copy step reports it.
   The command refuses a group with two full-size VOLUME images, because then it
   cannot tell the pyramids apart. With `-d`, a series that has more than one group gets file
   names `<SOPInstanceUID>.dcm` in place of `level-<n>.dcm`.
+
 - **WR-I8.** The new files replace the old ones by rename, the base last. If a rename
   fails, the command removes the new files that it renamed, so the old pyramid stays whole
   (WR-U7). After the renames, each old level is deleted on its own. A level that cannot be

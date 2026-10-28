@@ -396,6 +396,50 @@ test("a sparse base with a focus map is rebuilt, and one with two frames at one 
   expect(fs.readFileSync(wsi.base.path).equals(before)).toBe(true);
 });
 
+// User experience: a low-magnification second plane is never taken for a
+// level of the full plane, so --in-place does not delete it.
+test("a plane with only lower levels stays apart from the full plane", async () => {
+  const dir = path.join(tmpDir, "low-mag-plane");
+  const full = await writeSyntheticWsi(dcmjs, dir, {
+    zOffset: 0,
+    prefix: "a-",
+  });
+  const low = await writeSyntheticWsi(dcmjs, dir, {
+    series: full.series,
+    prefix: "b-",
+  });
+  fs.rmSync(low.base.path);
+  fs.rmSync(low.label.path);
+  // The half level of plane b is at Z 5; the same size as a's half level.
+  const bytes = fs.readFileSync(low.half.path);
+  const part10 = dcmjs.data.DicomMessage.readFile(
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)
+  );
+  part10.dict["52009229"].Value[0]["0048021A"] = {
+    vr: "SQ",
+    Value: [{ "0040074A": { vr: "DS", Value: [5] } }],
+  };
+  fs.writeFileSync(
+    low.half.path,
+    Buffer.from(part10.write({ fragmentMultiframe: false }))
+  );
+
+  const { code } = await wsiresize([dir], {
+    "in-place": true,
+    preset: "jxl-lossless",
+    tile: "256",
+    factor: "4",
+    quiet: true,
+  });
+  expect(code).toBe(0);
+  // a's half had no Z and a new size: it was a level of plane a, replaced.
+  expect(fs.existsSync(full.half.path)).toBe(false);
+  // b's half repeats that size at another Z: its own plane, rebuilt in place.
+  const kept = await readPart10Header({ dcmjs, inputPath: low.half.path });
+  expect(kept.dict["00080018"].Value[0]).toBe(low.half.sop);
+  expect(kept.meta["00020010"].Value[0]).toBe("1.2.840.10008.1.2.4.110");
+});
+
 // User experience: a messy input set does not stop or break the run.
 test("an unreadable file is skipped, and a file given twice is read once", async () => {
   const dir = path.join(tmpDir, "messy");
