@@ -238,9 +238,10 @@ test("--in-place rebuilds each optical path of a series, and deletes only that p
   }
 });
 
-// User experience: focal planes are separate pyramids; levels without a
-// plane position belong to the one plane of their optical path.
-test("--in-place keeps focal planes apart, and places levels that have no plane position", async () => {
+// User experience: levels without a plane position belong to the one plane
+// of their optical path; with several planes, --in-place refuses, and -d
+// keeps the focal planes apart as separate pyramids (WR-U4b).
+test("focal planes stay apart, and levels without a plane position are placed only when clear", async () => {
   const single = path.join(tmpDir, "one-plane");
   const one = await writeSyntheticWsi(dcmjs, single, { zOffset: 0 });
   const opts = {
@@ -262,33 +263,55 @@ test("--in-place keeps focal planes apart, and places levels that have no plane 
     zOffset: 0,
     prefix: "a-",
   });
-  const b = await writeSyntheticWsi(dcmjs, planes, {
+  await writeSyntheticWsi(dcmjs, planes, {
     series: a.series,
     zOffset: 5,
     prefix: "b-",
   });
   const sourceA = await decodeLevel(a.base.path);
-  const run = await wsiresize([planes], opts);
-  expect(run.code).toBe(0);
+  const before = fs
+    .readdirSync(planes)
+    .map((f) => [f, fs.readFileSync(path.join(planes, f))]);
+  const refused = await wsiresize([planes], opts);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toMatch(/--in-place could delete a level/);
   // The halves have no plane position: they are named, not left silently.
-  expect(run.err).toMatch(/warning: .*a-half\.dcm: the focal plane/);
-  // The sparse base is placed by its new plane positions, pixel for pixel.
-  const rebuiltA = await decodeLevel(a.base.path);
-  expect(Buffer.from(rebuiltA.data).equals(Buffer.from(sourceA.data))).toBe(
-    true
+  expect(refused.err).toMatch(/warning: .*a-half\.dcm: the focal plane/);
+  for (const [f, bytes] of before) {
+    expect(fs.readFileSync(path.join(planes, f)).equals(bytes)).toBe(true);
+  }
+
+  const copyOpts = {
+    preset: "jxl-lossless",
+    tile: "256",
+    factor: "4",
+    quiet: true,
+    json: true,
+  };
+  const run = await wsiresize([planes], {
+    ...copyOpts,
+    directory: path.join(tmpDir, "two-planes-out"),
+  });
+  expect(run.code).toBe(0);
+  const bases = JSON.parse(run.text).series.map(
+    (s) => s.written.find((w) => w.level === 0).path
   );
-  for (const wsi of [a, b]) {
-    const base = await readPart10Header({ dcmjs, inputPath: wsi.base.path });
-    expect(base.dict["00080018"].Value[0]).toBe(wsi.base.sop);
+  expect(bases).toHaveLength(2);
+  for (const file of bases) {
+    const base = await readPart10Header({ dcmjs, inputPath: file });
     expect(base.meta["00020010"].Value[0]).toBe("1.2.840.10008.1.2.4.110");
-    // With two planes, a level without a plane position cannot be placed,
-    // so it stays as it is.
-    expect(fs.existsSync(wsi.half.path)).toBe(true);
     // Several focal planes keep the sparse layout, and with it the Z offset.
     expect(base.dict["00209311"].Value[0]).toBe("TILED_SPARSE");
     const perFrame = base.dict["52009230"].Value;
-    const position = perFrame[0]["0048021A"].Value[0];
-    expect(Number(position["0040074A"].Value[0])).toBe(wsi === a ? 0 : 5);
+    const z = Number(perFrame[0]["0048021A"].Value[0]["0040074A"].Value[0]);
+    expect([0, 5]).toContain(z);
+    if (z === 0) {
+      // The sparse base is placed by its new plane positions, pixel for pixel.
+      const rebuiltA = await decodeLevel(file);
+      expect(Buffer.from(rebuiltA.data).equals(Buffer.from(sourceA.data))).toBe(
+        true
+      );
+    }
     // Tile 2 is one tile to the right: slide Y moves by 256 x 0.0005 mm.
     const next = perFrame[1]["0048021A"].Value[0];
     expect(Number(next["0040072A"].Value[0])).toBeCloseTo(20, 10);
@@ -299,7 +322,12 @@ test("--in-place keeps focal planes apart, and places levels that have no plane 
     expect(indices(1)).toEqual([2, 1, 1]);
   }
   // So a second run still tells the planes apart.
-  expect((await wsiresize([planes], opts)).code).toBe(0);
+  const again = await wsiresize([path.join(tmpDir, "two-planes-out")], {
+    ...copyOpts,
+    directory: path.join(tmpDir, "two-planes-again"),
+  });
+  expect(again.code).toBe(0);
+  expect(JSON.parse(again.text).series).toHaveLength(2);
 });
 
 // API: a TILED_FULL level keeps the per-frame macros that are the same for all frames.
@@ -430,23 +458,42 @@ test.each([
       Buffer.from(part10.write({ fragmentMultiframe: false }))
     );
 
-    const { code, err } = await wsiresize([dir], {
-      "in-place": true,
+    const opts = {
       preset: "jxl-lossless",
       tile: "256",
       factor: "4",
       quiet: true,
-    });
-    expect(code).toBe(0);
+    };
+    const before = fs
+      .readdirSync(dir)
+      .map((f) => [f, fs.readFileSync(path.join(dir, f))]);
+    const { code, err } = await wsiresize([dir], { ...opts, "in-place": true });
+    // Two planes: --in-place refuses, and every file stays as it was.
+    expect(code).toBe(1);
+    expect(err).toMatch(/--in-place could delete a level/);
+    for (const [f, bytes] of before) {
+      expect(fs.readFileSync(path.join(dir, f)).equals(bytes)).toBe(true);
+    }
     // The full plane's half has no Z, and two Z planes exist: it is not
-    // guessed into either, but named and left as it is.
-    expect(fs.existsSync(full.half.path)).toBe(true);
+    // guessed into either, but named.
     expect(err).toMatch(/warning: .*half\.dcm: the focal plane/);
-    // The Z 5 half is its own plane, rebuilt in place; it stays RESAMPLED.
-    const kept = await readPart10Header({ dcmjs, inputPath: low.half.path });
-    expect(kept.dict["00080018"].Value[0]).toBe(low.half.sop);
-    expect(kept.meta["00020010"].Value[0]).toBe("1.2.840.10008.1.2.4.110");
-    expect(kept.dict["00080008"].Value[3]).toBe("RESAMPLED");
+
+    // -d rebuilds the Z 5 half as its own plane; it stays RESAMPLED.
+    const copy = await wsiresize([dir], {
+      ...opts,
+      directory: path.join(tmpDir, `low-mag-out-${fullPrefix}`),
+      json: true,
+    });
+    expect(copy.code).toBe(0);
+    const types = [];
+    for (const { written } of JSON.parse(copy.text).series) {
+      const { dict } = await readPart10Header({
+        dcmjs,
+        inputPath: written.find((w) => w.level === 0).path,
+      });
+      types.push(`${dict["00480006"].Value[0]} ${dict["00080008"].Value[3]}`);
+    }
+    expect(types.sort()).toEqual(["300 RESAMPLED", "600 NONE"]);
   }
 );
 

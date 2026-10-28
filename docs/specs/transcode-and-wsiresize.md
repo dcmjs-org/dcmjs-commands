@@ -107,7 +107,11 @@ rules:
   focal plane. With `-d`, the pyramids of one source series go to one new series, keep one
   shared PyramidUID (a new UID for each source PyramidUID), and have InstanceNumber values
   that do not repeat in the series. The rebuilt levels keep their focal plane, so the
-  command can run again on its own output and still tell the planes apart.
+  command can run again on its own output and still tell the planes apart. The files do
+  not always tell which focal plane a level belongs to. When the plane of a level is
+  unclear, or an optical path has more than one focal plane, `--in-place` refuses that
+  optical path, changes no file of it, and tells the user to use `-d`. `-d` never deletes
+  a file, so the worst result of an unclear plane with `-d` is an extra pyramid.
 - **WR-U5.** The command prints the size of the total pixel matrix, the levels before and
   after, and the same totals as TC-U5.
 - **WR-U6.** The pixels of the new base level come from the source base level, at the same
@@ -236,7 +240,7 @@ rules:
   gives no Z key). The command never guesses a plane from level sizes or file order:
   - A constant Z is a plane. The one exception is a Z group of only one-tile levels: a
     one-tile level has a constant Z even in a focus-map slide, so the group joins the group
-    of its optical path that holds the full-size level, when exactly one group holds it.
+    without a Z key that holds the full-size level, when exactly one group holds it.
   - A group without a Z key that holds a level as large as any Z group's is a plane of its
     own and is rebuilt. Otherwise it joins the one Z group of its optical path.
   - With several Z groups, a level without a Z key cannot be placed: the command leaves it as
@@ -245,6 +249,10 @@ rules:
   - When an optical path has more than one plane, the Z planes are written `TILED_SPARSE`
     with their Z. A rebuilt base that was itself a reduced level keeps ImageType
     `RESAMPLED`.
+  - An optical path is ambiguous when it has more than one plane, when a one-tile Z group
+    joined another group, or when one of its levels is unplaced. `--in-place` refuses each
+    pyramid of an ambiguous optical path before it writes or deletes a file (WR-U4b). Only
+    the join of the no-Z levels into the one Z group is clear enough for `--in-place`.
 
   LABEL and OVERVIEW images are not grouped. A file that two inputs hold is read once. A file whose header cannot be read
   is reported on stderr, counted as a failure, and skipped; the other series still run.

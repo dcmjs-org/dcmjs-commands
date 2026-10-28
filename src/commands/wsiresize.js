@@ -274,11 +274,14 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
         g.paths === group.paths &&
         g.levels.length
     );
+  // Optical paths whose grouping is a guess; --in-place refuses them (WR-U4b).
+  const ambiguous = new Set();
+  const pathOf = (g) => `${g.uid}|${g.paths}`;
   const oneTile = (l) => Number(first(l.dict, "00280008") ?? 1) === 1;
   // A constant Z is a plane, with one exception: a level of one tile has a
   // constant Z even in a focus-map slide. A Z group of only one-tile levels
-  // joins the group of its optical path that holds the full-size level,
-  // when exactly one group holds it. No other Z group is ever merged.
+  // joins the group without a Z key that holds the full-size level, when
+  // exactly one group holds it. No other Z group is ever merged.
   for (const group of groups.filter((g) => g.z !== "" && g.levels.length)) {
     if (!group.levels.every(oneTile)) {
       continue;
@@ -288,9 +291,14 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
     const holders = others.filter((g) =>
       g.levels.some((l) => area(l) === largest)
     );
-    if (holders.length === 1 && largest > Math.max(...group.levels.map(area))) {
+    if (
+      holders.length === 1 &&
+      holders[0].z === "" &&
+      largest > Math.max(...group.levels.map(area))
+    ) {
       holders[0].levels.push(...group.levels);
       group.levels = [];
+      ambiguous.add(pathOf(group));
     }
   }
   // Levels without a Z key (TILED_FULL levels, focus maps): a group that
@@ -310,6 +318,7 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
       planes[0].levels.push(...loose.levels);
     } else {
       unplaced.push(...loose.levels.map((l) => l.path));
+      ambiguous.add(pathOf(loose));
     }
     loose.levels = [];
   }
@@ -320,8 +329,9 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
     );
     // A plane whose base did not come with it (an unplaced focus-map base)
     // is not rebuilt; its levels are reported too, never dropped silently.
-    if (!group.base) {
+    if (!group.base && group.levels.length) {
       unplaced.push(...group.levels.map((l) => l.path));
+      ambiguous.add(pathOf(group));
     }
   }
   groups = groups.filter((g) => g.base);
@@ -331,6 +341,9 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
     // Several planes of one optical path: the Z groups keep their Z in a
     // sparse layout (WR-I3).
     group.multiPlane = series.filter((g) => g.paths === group.paths).length > 1;
+  }
+  for (const group of groups) {
+    group.ambiguous = group.multiPlane || ambiguous.has(pathOf(group));
   }
   return groups;
 }
@@ -761,6 +774,12 @@ async function resizeSeries({
   nextInstance,
 }) {
   const { base } = group;
+  if (inPlace && group.ambiguous) {
+    throw new Error(
+      "the optical path has several focal planes or levels on an unclear " +
+        "plane, so --in-place could delete a level of another plane; use -d"
+    );
+  }
   checkBase(base);
   checkPyramid(group, inPlace);
   const shared = sharedGroups(base);
