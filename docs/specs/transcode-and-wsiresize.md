@@ -111,7 +111,8 @@ rules:
   not always tell which focal plane a level belongs to. When the plane of a level is
   unclear, or an optical path has more than one focal plane, `--in-place` refuses that
   optical path, changes no file of it, and tells the user to use `-d`. `-d` never deletes
-  a file, so the worst result of an unclear plane with `-d` is an extra pyramid.
+  a file. With `-d`, an unclear plane can give an extra pyramid, or a level that the new
+  series does not hold; the command names each such level.
 - **WR-U5.** The command prints the size of the total pixel matrix, the levels before and
   after, and the same totals as TC-U5.
 - **WR-U6.** The pixels of the new base level come from the source base level, at the same
@@ -249,10 +250,10 @@ rules:
   - When an optical path has more than one plane, the Z planes are written `TILED_SPARSE`
     with their Z. A rebuilt base that was itself a reduced level keeps ImageType
     `RESAMPLED`.
-  - An optical path is ambiguous when it has more than one plane, when a one-tile Z group
-    joined another group, or when one of its levels is unplaced. `--in-place` refuses each
-    pyramid of an ambiguous optical path before it writes or deletes a file (WR-U4b). Only
-    the join of the no-Z levels into the one Z group is clear enough for `--in-place`.
+  - An optical path is ambiguous when it has more than one plane, or when one of its levels
+    is unplaced. Before it writes or deletes a file, `--in-place` refuses each ambiguous
+    optical path once, also with `--dry-run`, and counts one failure for it (WR-U4b). The
+    two joins above leave one plane, so they do not make the optical path ambiguous.
 
   LABEL and OVERVIEW images are not grouped. A file that two inputs hold is read once. A file whose header cannot be read
   is reported on stderr, counted as a failure, and skipped; the other series still run.

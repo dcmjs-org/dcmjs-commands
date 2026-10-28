@@ -202,7 +202,9 @@ async function writeLevel(
  * `photometric` labels every level; `perFrameMeasures` puts the base
  * PixelMeasures in the per-frame groups only; `zOffset` gives the base
  * frames a focal plane (the lower levels have no plane position);
- * `extendedOffsetTable` gives the base an Extended Offset Table.
+ * `extendedOffsetTable` gives the base an Extended Offset Table;
+ * `halfTile` sets the tile size of the half level, and `halfZ` gives it a
+ * plane position at that Z.
  */
 export async function writeSyntheticWsi(
   dcmjs,
@@ -215,6 +217,8 @@ export async function writeSyntheticWsi(
     perFrameMeasures,
     zOffset,
     extendedOffsetTable,
+    halfTile = 256,
+    halfZ,
   } = {}
 ) {
   fs.mkdirSync(dir, { recursive: true });
@@ -242,10 +246,19 @@ export async function writeSyntheticWsi(
   const half = await writeLevel(dcmjs, path.join(dir, `${prefix}half.dcm`), {
     width: 300,
     height: 200,
-    tile: 256,
+    tile: halfTile,
     scale: 2,
     imageType: "VOLUME",
     series,
+    order:
+      halfZ === undefined
+        ? undefined
+        : [
+            ...Array(
+              Math.ceil(300 / halfTile) * Math.ceil(200 / halfTile)
+            ).keys(),
+          ],
+    zOffset: halfZ,
     opticalPath,
     photometric,
   });

@@ -259,8 +259,11 @@ progressive — and `jpeg-512`. `-d` writes a new series; `--in-place` keeps
 the base level's SOPInstanceUID and the SeriesInstanceUID, so references to
 the base level (for example bulk annotations) stay valid, and deletes the
 old lower levels. Each optical path and focal plane is its own pyramid, so
-other channels are never deleted. With a lossy preset, `--in-place` still
-keeps the base SOPInstanceUID and prints a warning.
+other channels are never deleted. The files do not always tell which focal
+plane a level belongs to, so `--in-place` refuses an optical path with
+several focal planes, or with a level on an unclear plane; use `-d` for such
+a slide. With a lossy preset, `--in-place` still keeps the base
+SOPInstanceUID and prints a warning.
 
 ```bash
 dcmjs wsiresize ./slide --dry-run                   # print the planned levels

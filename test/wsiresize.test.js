@@ -297,6 +297,7 @@ test("focal planes stay apart, and levels without a plane position are placed on
     (s) => s.written.find((w) => w.level === 0).path
   );
   expect(bases).toHaveLength(2);
+  const zs = [];
   for (const file of bases) {
     const base = await readPart10Header({ dcmjs, inputPath: file });
     expect(base.meta["00020010"].Value[0]).toBe("1.2.840.10008.1.2.4.110");
@@ -304,7 +305,7 @@ test("focal planes stay apart, and levels without a plane position are placed on
     expect(base.dict["00209311"].Value[0]).toBe("TILED_SPARSE");
     const perFrame = base.dict["52009230"].Value;
     const z = Number(perFrame[0]["0048021A"].Value[0]["0040074A"].Value[0]);
-    expect([0, 5]).toContain(z);
+    zs.push(z);
     if (z === 0) {
       // The sparse base is placed by its new plane positions, pixel for pixel.
       const rebuiltA = await decodeLevel(file);
@@ -321,6 +322,7 @@ test("focal planes stay apart, and levels without a plane position are placed on
     expect(indices(0)).toEqual([1, 1, 1]);
     expect(indices(1)).toEqual([2, 1, 1]);
   }
+  expect(zs.sort()).toEqual([0, 5]);
   // So a second run still tells the planes apart.
   const again = await wsiresize([path.join(tmpDir, "two-planes-out")], {
     ...copyOpts,
@@ -407,6 +409,23 @@ test("a sparse base with a focus map is rebuilt, and one with two frames at one 
     directory: path.join(tmpDir, "focus-out"),
   });
   expect(focus.code).toBe(0);
+
+  // A one-tile lower level has a constant Z of its own, and is still a level
+  // of the one focus-map plane: --in-place rebuilds the slide.
+  const thumb = await writeSyntheticWsi(dcmjs, path.join(tmpDir, "focus-1"), {
+    zOffset: 0,
+    halfTile: 512,
+    halfZ: 0.0012,
+  });
+  editBase(thumb.base.path, (dict) => {
+    positionOf(dict, 1)["0040074A"].Value = [0.0015];
+  });
+  const inPlace = await wsiresize([path.dirname(thumb.base.path)], {
+    ...opts,
+    "in-place": true,
+  });
+  expect(inPlace.code).toBe(0);
+  expect(fs.existsSync(thumb.half.path)).toBe(false);
 
   // Frame 1 is a second plane of the tile of frame 0.
   const dir = path.join(tmpDir, "two-z-in-one");

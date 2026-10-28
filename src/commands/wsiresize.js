@@ -96,7 +96,9 @@ Output (one is required):
                           level (for example bulk annotations) stay valid,
                           also with a lossy preset (a warning is printed).
                           The other old levels of the same optical path and
-                          focal plane are deleted.
+                          focal plane are deleted. An optical path with
+                          several focal planes, or with a level on an
+                          unclear plane, is refused; use -d for it.
 
 Options:
   -p, --preset <name>     ${Object.keys(PRESETS).join(", ")}
@@ -298,7 +300,6 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
     ) {
       holders[0].levels.push(...group.levels);
       group.levels = [];
-      ambiguous.add(pathOf(group));
     }
   }
   // Levels without a Z key (TILED_FULL levels, focus maps): a group that
@@ -341,9 +342,12 @@ async function findPyramids(dcmjs, positionals, unreadable, unplaced = []) {
     // Several planes of one optical path: the Z groups keep their Z in a
     // sparse layout (WR-I3).
     group.multiPlane = series.filter((g) => g.paths === group.paths).length > 1;
+    if (group.multiPlane) {
+      ambiguous.add(pathOf(group));
+    }
   }
   for (const group of groups) {
-    group.ambiguous = group.multiPlane || ambiguous.has(pathOf(group));
+    group.ambiguous = ambiguous.has(pathOf(group));
   }
   return groups;
 }
@@ -774,12 +778,6 @@ async function resizeSeries({
   nextInstance,
 }) {
   const { base } = group;
-  if (inPlace && group.ambiguous) {
-    throw new Error(
-      "the optical path has several focal planes or levels on an unclear " +
-        "plane, so --in-place could delete a level of another plane; use -d"
-    );
-  }
   checkBase(base);
   checkPyramid(group, inPlace);
   const shared = sharedGroups(base);
@@ -1070,7 +1068,28 @@ export async function runWsiResize({
     return 1;
   }
 
-  if (inPlace && options.target.lossy && !dryRun) {
+  const reports = [];
+  let failed = unreadable.length;
+  // WR-U4b: refused once for each optical path, before any file changes.
+  if (inPlace) {
+    const refused = new Set();
+    for (const { uid, paths, ambiguous } of groups) {
+      const key = `${uid}|${paths}`;
+      if (!ambiguous || refused.has(key)) {
+        continue;
+      }
+      refused.add(key);
+      failed++;
+      const error =
+        "the optical path has several focal planes or levels on an unclear " +
+        "plane, so --in-place could delete a level of another plane; use -d";
+      reports.push({ series: uid, error });
+      stderr(`dcmjs wsiresize: series ${uid}: ${error}`);
+    }
+    groups = groups.filter((g) => !g.ambiguous);
+  }
+
+  if (inPlace && options.target.lossy && !dryRun && groups.length) {
     stderr(
       `dcmjs wsiresize: warning: ${options.target.name} is lossy, and ` +
         "--in-place keeps the base SOPInstanceUID. A system that already " +
@@ -1093,8 +1112,6 @@ export async function runWsiResize({
     return instances.get(seriesUid);
   };
 
-  const reports = [];
-  let failed = unreadable.length;
   const progress = new Progress({
     command: "wsiresize",
     totalFiles: groups.length,
