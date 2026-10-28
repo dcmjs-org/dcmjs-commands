@@ -225,13 +225,14 @@ function planeKey(dict) {
 
 /**
  * Pyramids by SeriesInstanceUID, optical path and focal plane:
- * `{ uid, key, base, levels, shared, multiPlane }`. LABEL and OVERVIEW
- * images are left out. A file is read once, also when two inputs hold it;
- * a file whose header cannot be read goes to `unreadable` and is skipped.
- * A level that cannot be placed on one focal plane goes to `unplaced` (its
- * path), and is left as it is. An optical path with more than one plane or
- * an unplaced level goes to `ambiguous` (key `pathKey`, value
- * `{ uid, paths }`), which `--in-place` refuses (WR-U4b).
+ * `{ uid, paths, z, key, opticalKey, base, levels, shared, multiPlane }`.
+ * LABEL and OVERVIEW images are left out. A file is read once, also when
+ * two inputs hold it; a file whose header cannot be read goes to
+ * `unreadable` and is skipped. A level that cannot be placed on one focal
+ * plane goes to `unplaced` (its path), and is left as it is. An optical
+ * path with more than one plane or an unplaced level goes to `ambiguous`
+ * (key `opticalKey`, value `{ uid, paths }`); `--in-place` refuses the
+ * groups of that key (WR-U4b).
  */
 async function findPyramids(
   dcmjs,
@@ -273,7 +274,7 @@ async function findPyramids(
           paths,
           z,
           key: `${paths}|${z}`,
-          pathKey: `${uid}|${paths}`,
+          opticalKey: `${uid}|${paths}`,
           levels: [],
         });
       }
@@ -291,8 +292,8 @@ async function findPyramids(
         g.paths === group.paths &&
         g.levels.length
     );
-  const markAmbiguous = ({ uid, paths, pathKey }) =>
-    ambiguous.set(pathKey, { uid, paths });
+  const markAmbiguous = ({ uid, paths, opticalKey }) =>
+    ambiguous.set(opticalKey, { uid, paths });
   const oneTile = (l) => Number(first(l.dict, "00280008") ?? 1) === 1;
   // A constant Z is a plane, with one exception: a level of one tile has a
   // constant Z even in a focus-map slide. A Z group of only one-tile levels
@@ -344,9 +345,12 @@ async function findPyramids(
     );
     // A plane whose base did not come with it (an unplaced focus-map base)
     // is not rebuilt; its levels are reported too, never dropped silently.
+    // With no other group of its optical path, nothing was guessed.
     if (!group.base && group.levels.length) {
       unplaced.push(...group.levels.map((l) => l.path));
-      markAmbiguous(group);
+      if (siblingsOf(group).length) {
+        markAmbiguous(group);
+      }
     }
   }
   groups = groups.filter((g) => g.base);
@@ -1081,25 +1085,24 @@ export async function runWsiResize({
         "unclear, so it is left as it is"
     );
   }
-  if (!groups.length && !(inPlace && ambiguous.size)) {
-    stderr("dcmjs wsiresize: no VL Whole Slide Microscopy pyramid found");
-    return 1;
-  }
-
   const reports = [];
   let failed = unreadable.length;
   // WR-U4b: refused once for each optical path, before any file changes.
   if (inPlace) {
     for (const { uid, paths } of ambiguous.values()) {
       failed++;
+      const name = paths ? `optical path "${paths}"` : "the optical path";
       const error =
-        `optical path "${paths}" has several focal planes or levels on an ` +
-        "unclear plane, so --in-place could delete a level of another " +
-        "plane; use -d";
+        `${name} has several focal planes or levels on an unclear plane, ` +
+        "so --in-place could delete a level of another plane; use -d";
       reports.push({ series: uid, opticalPaths: paths, error });
       stderr(`dcmjs wsiresize: series ${uid}: ${error}`);
     }
-    groups = groups.filter((g) => !ambiguous.has(g.pathKey));
+    groups = groups.filter((g) => !ambiguous.has(g.opticalKey));
+  }
+  if (!groups.length && !reports.length) {
+    stderr("dcmjs wsiresize: no VL Whole Slide Microscopy pyramid found");
+    return 1;
   }
 
   if (inPlace && options.target.lossy && !dryRun && groups.length) {

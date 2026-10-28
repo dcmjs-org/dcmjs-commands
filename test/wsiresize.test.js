@@ -280,6 +280,17 @@ test("focal planes stay apart, and levels without a plane position are placed on
   for (const [f, bytes] of before) {
     expect(fs.readFileSync(path.join(planes, f)).equals(bytes)).toBe(true);
   }
+  // A dry run tells the same: one refusal for the one optical path.
+  const dry = await wsiresize([planes], {
+    ...opts,
+    "dry-run": true,
+    json: true,
+  });
+  expect(dry.code).toBe(1);
+  const refusals = JSON.parse(dry.text).series.filter((s) => s.error);
+  expect(refusals).toEqual([
+    expect.objectContaining({ series: a.series.uid, opticalPaths: "" }),
+  ]);
 
   const copyOpts = {
     preset: "jxl-lossless",
