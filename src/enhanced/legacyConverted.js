@@ -109,6 +109,8 @@ const T = Object.fromEntries(
     "ReferencedSOPClassUID",
     "ReferencedSOPInstanceUID",
     "EchoNumbers",
+    "TemporalPositionIdentifier",
+    "DiffusionBValue",
   ].map((keyword) => [keyword, tagOf(keyword)])
 );
 
@@ -501,14 +503,77 @@ export function groupInstances(instances, { layout = "split" } = {}) {
   return { stacks, refused, skipped };
 }
 
+/** A number of an attribute, or null when it is absent or not a number. */
+function numberOrNull(dict, tag) {
+  const value = Number(first(dict, tag) ?? NaN);
+  return Number.isFinite(value) ? value : null;
+}
+
 /**
- * The volumes of one group: the images with one EchoNumbers value and one
- * ImageType from value 4 on (for example FAT or IN_PHASE of a Dixon
- * series), ordered by echo and then by type. The images of a volume are in
- * slice order along the normal; images at one position keep the order of
+ * The first value of the private element `offset` (2 hex digits) of the
+ * block of `creator` in `group`, or undefined.
+ */
+function privateValue(dict, group, creator, offset) {
+  for (let block = 0x10; block <= 0xff; block++) {
+    const hex = block.toString(16).toUpperCase().padStart(2, "0");
+    const name = first(dict, `${group}00${hex}`);
+    if (String(name ?? "").trim() === creator) {
+      return first(dict, `${group}${hex}${offset}`);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The diffusion b-value: DiffusionBValue, else the private b-value of
+ * Siemens, GE (which can add 1e9 to it) or Philips classic MR images.
+ */
+function bValueOf(dict) {
+  const value = [
+    first(dict, T.DiffusionBValue),
+    privateValue(dict, "0019", "SIEMENS MR HEADER", "0C"),
+    privateValue(dict, "0043", "GEMS_PARM_01", "39"),
+    privateValue(dict, "2001", "Philips Imaging DD 001", "03"),
+  ].find((v) => v !== undefined && v !== "");
+  const number = Number(value ?? NaN);
+  return Number.isFinite(number) ? number % 1e9 : null;
+}
+
+/** Sorts null before the numbers. */
+const byNumber = (a, b) =>
+  a === b ? 0 : a === null ? -1 : b === null ? 1 : a - b;
+
+/**
+ * The volumes of one group: the images with one temporal position, b-value
+ * (`bValueOf`) and EchoNumbers value, and one ImageType from value 4 on
+ * (for example FAT or IN_PHASE of a Dixon series). The volumes are ordered
+ * by temporal position, b-value, echo and type, so the echoes of a time
+ * point or a b-value are in echo order. The images of a volume are in slice
+ * order along the normal; images at one position keep the order of
  * AcquisitionNumber, InstanceNumber and SOPInstanceUID.
+ *
+ * The temporal position is TemporalPositionIdentifier. When no image has
+ * one and positions repeat, AcquisitionNumber is the temporal position if
+ * it makes every volume a stack of 2 or more images (the phases of a
+ * dynamic series). It is not used otherwise, because many CT series give
+ * each slice its own AcquisitionNumber.
  */
 function volumesOf(group) {
+  const volumes = volumesBy(group, T.TemporalPositionIdentifier);
+  if (
+    volumes.every((volume) => volume.isStack) ||
+    volumes.some((volume) => volume.time !== null)
+  ) {
+    return volumes;
+  }
+  const phases = volumesBy(group, T.AcquisitionNumber, "acquisition");
+  return phases.every((v) => v.isStack && v.sorted.length > 1)
+    ? phases
+    : volumes;
+}
+
+/** The volumes of `volumesOf`, with `timeTag` as the temporal position. */
+function volumesBy(group, timeTag, timeName = "time") {
   const position = ({ dict }) => {
     const p = numbers(dict, T.ImagePositionPatient);
     return (
@@ -522,17 +587,33 @@ function volumesOf(group) {
   ];
   const byKey = new Map();
   for (const instance of group.instances) {
-    const echo = Number(first(instance.dict, T.EchoNumbers) ?? 0);
-    const type = strings(instance.dict, T.ImageType).slice(3).join("\\");
-    const key = JSON.stringify([echo, type]);
+    const { dict } = instance;
+    const time = numberOrNull(dict, timeTag);
+    const bValue = bValueOf(dict);
+    const echo = Number(first(dict, T.EchoNumbers) ?? 0);
+    const type = strings(dict, T.ImageType).slice(3).join("\\");
+    const key = JSON.stringify([time, bValue, echo, type]);
     if (!byKey.has(key)) {
-      byKey.set(key, { echo, type, instances: [] });
+      byKey.set(key, { time, bValue, echo, type, instances: [] });
     }
     byKey.get(key).instances.push({ instance, at: position(instance) });
   }
   const volumes = [...byKey.values()].sort(
-    (a, b) => a.echo - b.echo || a.type.localeCompare(b.type)
+    (a, b) =>
+      byNumber(a.time, b.time) ||
+      byNumber(a.bValue, b.bValue) ||
+      a.echo - b.echo ||
+      a.type.localeCompare(b.type)
   );
+  // Only the keys that differ between the volumes name a volume.
+  const differs = (field) =>
+    new Set(volumes.map((volume) => volume[field])).size > 1;
+  const named = {
+    time: differs("time"),
+    bValue: differs("bValue"),
+    echo: differs("echo"),
+    type: differs("type"),
+  };
   return volumes.map((volume, v) => {
     const sorted = volume.instances.sort((a, b) => {
       if (Math.abs(a.at - b.at) > 1e-4) {
@@ -544,11 +625,19 @@ function volumesOf(group) {
     return {
       label:
         volumes.length > 1
-          ? [volume.echo && `echo ${volume.echo}`, volume.type]
+          ? [
+              named.time &&
+                volume.time !== null &&
+                `${timeName} ${volume.time}`,
+              named.bValue && volume.bValue !== null && `b ${volume.bValue}`,
+              named.echo && volume.echo && `echo ${volume.echo}`,
+              named.type && volume.type,
+            ]
               .filter(Boolean)
               .join(" ")
           : "",
       stackId: String(v + 1),
+      time: volume.time,
       isStack: sorted.every(
         (s, i) => !i || Math.abs(s.at - sorted[i - 1].at) > 1e-4
       ),

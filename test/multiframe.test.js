@@ -179,6 +179,33 @@ test("orders interleaved MR echoes consistently in the split, grouped and interl
   ).toEqual(order.map((s) => [s.z / 2 + 1, s.echo]));
 });
 
+// User experience: a dynamic or a diffusion series splits into one volume
+// for each temporal position or b-value, in that order.
+test.each([
+  ["time", ["time 1", "time 2", "time 3"]],
+  ["acquisition", ["acquisition 1", "acquisition 2", "acquisition 3"]],
+  ["b", ["b 0", "b 1000", "b 2000"]],
+  ["siemens-b", ["b 0", "b 1000", "b 2000"]],
+])("splits a series by %s into volumes in order", async (vary, labels) => {
+  const dir = path.join(tmpDir, `vary-${vary}`);
+  const mr = writeSyntheticCt(dcmjs, dir, { echoes: 3, vary });
+  const { code, text } = await multiframe([dir], {
+    directory: `${dir}-out`,
+    json: true,
+  });
+  expect(code).toBe(0);
+  const { instances } = JSON.parse(text);
+  expect(instances.map((i) => i.volumes)).toEqual(labels.map((l) => [l]));
+  for (const [v, converted] of instances.entries()) {
+    const { frames } = await readFile(converted.path);
+    expect(frames).toEqual(
+      mr.slices
+        .filter((s) => s.echo === v + 1)
+        .map((s) => Buffer.from(slicePixels(s.z, s.echo).buffer))
+    );
+  }
+});
+
 // User experience: an image that the IOD does not allow is named, not lost.
 test("leaves a MONOCHROME1 slice out, names it, and converts the others", async () => {
   const ct = writeSyntheticCt(dcmjs, path.join(tmpDir, "mono1"), {

@@ -36,9 +36,14 @@ rules:
   than one group, for example a localizer and an axial series, gives more than one new
   instance. A group of one image is not converted, and is named on stderr.
 - **LC-U4.** A group with more than one image at a position has one volume for each
-  EchoNumbers value and ImageType from value 4 on, for example echo 1 and echo 2, or the
-  FAT, WATER, IN_PHASE and OPP_PHASE images of a Dixon series. The volumes are in the order
-  of EchoNumbers, then of ImageType. `--layout` gives the instances:
+  temporal position, b-value, EchoNumbers value and ImageType from value 4 on. Examples
+  are the phases of a dynamic series, the b-values of a diffusion series, echo 1 and
+  echo 2, and the FAT, WATER, IN_PHASE and OPP_PHASE images of a Dixon series. The volumes
+  are in the order of temporal position, b-value, EchoNumbers, then ImageType. The report
+  names each volume by the values that differ between the volumes, for example
+  `acquisition 2`, `b 600` or `echo 1 FAT`. A group with repeated positions that none of
+  these values separates stays one instance in slice order. `--layout` gives the
+  instances:
   - `split` (the default): one instance for each volume, with the InstanceNumber in the
     volume order;
   - `grouped`: one instance that holds the volumes one after the other;
@@ -83,10 +88,21 @@ rules:
 - **LC-I1.** `groupInstances` (`src/enhanced/legacyConverted.js`) groups the instances by
   SeriesInstanceUID, SOPClassUID, transfer syntax, SpecificCharacterSet,
   FrameOfReferenceUID, the Image Pixel attributes, and the ImageOrientationPatient rounded
-  to 1e-4. `volumesOf` splits a group by EchoNumbers and by ImageType from value 4 on. A
-  value of a string element that is joined with `\` (as some DICOM JSON writes it) is split
-  first. The frames of a volume are sorted by their position along the slice normal, then
-  by AcquisitionNumber, InstanceNumber and SOPInstanceUID.
+  to 1e-4. `volumesOf` splits a group by the temporal position, the b-value, EchoNumbers
+  and ImageType from value 4 on. A value of a string element that is joined with `\` (as
+  some DICOM JSON writes it) is split first. The frames of a volume are sorted by their
+  position along the slice normal, then by AcquisitionNumber, InstanceNumber and
+  SOPInstanceUID.
+  - The temporal position is TemporalPositionIdentifier. When no image has it and
+    positions repeat, AcquisitionNumber is the temporal position, but only if every
+    volume then is a stack of 2 or more images. Many CT series give each slice its own
+    AcquisitionNumber, so the command does not split by AcquisitionNumber otherwise.
+  - The b-value (`bValueOf`) is DiffusionBValue, else the private b-value of Siemens
+    (`SIEMENS MR HEADER` 0019,xx0C), GE (`GEMS_PARM_01` 0043,xx39, modulo 1e9) or Philips
+    (`Philips Imaging DD 001` 2001,xx03). The Private Creator gives the block.
+  - The b-value and the temporal position stay in the Unassigned groups. The volumes use
+    StackID and InStackPositionNumber, as LC-I2 states, and not the Temporal Position
+    Index or the MR Diffusion macro.
 - **LC-I2.** A volume whose frames all have different positions is a stack. Each frame gets
   StackID, InStackPositionNumber and DimensionIndexValues in the Frame Content macro:
   - one volume: StackID `1`, one dimension on InStackPositionNumber, and
@@ -170,10 +186,12 @@ rules:
   this problem, because the source series stays complete.
 - **References do not change** (LC-U8). Without `--new-series`, an SR, SEG or KO that refers
   to a converted image refers to an instance that the series metadata no longer lists.
-- **Other repeated positions.** The volumes come from EchoNumbers and ImageType only. A
-  dynamic series (positions that repeat in time) or a diffusion series (positions that
-  repeat for each b-value) becomes one instance in slice order, with no StackID and no
-  dimensions.
+- **Other repeated positions.** A series whose repeated positions none of the LC-I1 values
+  separates becomes one instance in slice order, with no StackID and no dimensions.
+  Examples are a time series at one position (each volume has one image), a dynamic
+  series that gives its phases only in a private element or in the AcquisitionTime, and a
+  diffusion series of a vendor other than Siemens, GE and Philips with no
+  DiffusionBValue.
 - **Source Image Sequence.** The Derivation Image macro needs a DerivationCodeSequence, and a
   classic image does not tell why it was derived. A SourceImageSequence thus stays in the
   Unassigned groups, and the Derivation Image macro is not written.

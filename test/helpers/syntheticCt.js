@@ -12,9 +12,10 @@ const MR = "1.2.840.10008.5.1.4.1.1.4";
 const EXPLICIT_LE = "1.2.840.10008.1.2.1";
 const SIZE = 16;
 
-function write(dcmjs, file, dataset, pixelData) {
+function write(dcmjs, file, dataset, pixelData, privates) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
   const dict = DicomMetaDictionary.denaturalizeDataset(dataset);
+  Object.assign(dict, privates || {});
   dict["7FE00010"] = pixelData;
   const meta = DicomMetaDictionary.denaturalizeDataset({
     FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
@@ -44,16 +45,20 @@ export function slicePixels(z, echo = 0) {
  * The InstanceNumber interleaves the echoes, and at every second position
  * echo 2 has the lower InstanceNumber, so that only EchoNumbers gives the
  * order of the echoes. Otherwise the series is CT and the InstanceNumber
- * counts down from the first slice.
+ * counts down from the first slice. `vary` gives the attribute that tells
+ * the volumes apart: "echo" (EchoNumbers), "time" (TemporalPositionIdentifier
+ * 1, 2, ...), "acquisition" (AcquisitionNumber 1, 2, ...), "b"
+ * (DiffusionBValue 0, 1000, ...) or "siemens-b" (the Siemens private
+ * b-value), with EchoNumbers 1.
  *
  * @returns {{ study, series, frameOfReference,
- *   slices: Array<{ path, sop, z, echo }> }} `slices` is in echo order,
- *   then in z order.
+ *   slices: Array<{ path, sop, z, echo }> }} `slices` is in volume order,
+ *   then in z order. `echo` is the volume number.
  */
 export function writeSyntheticCt(
   dcmjs,
   dir,
-  { count = 4, photometric, echoes = 1 } = {}
+  { count = 4, photometric, echoes = 1, vary = "echo" } = {}
 ) {
   const { uid } = dcmjs.data.DicomMetaDictionary;
   const study = uid();
@@ -102,12 +107,16 @@ export function writeSyntheticCt(
         ImageType: ["ORIGINAL", "PRIMARY", mr ? "OTHER" : "AXIAL"],
         ContentDate: "20260101",
         ContentTime: `0800${String(10 + i).padStart(2, "0")}`,
-        AcquisitionNumber: 1,
+        AcquisitionNumber: vary === "acquisition" ? slice.echo : 1,
         BodyPartExamined: "CHEST",
         ...(mr
           ? {
-              EchoNumbers: slice.echo,
-              EchoTime: slice.echo * 2.4,
+              EchoNumbers: vary === "echo" ? slice.echo : 1,
+              EchoTime: (vary === "echo" ? slice.echo : 1) * 2.4,
+              ...(vary === "time" && {
+                TemporalPositionIdentifier: slice.echo,
+              }),
+              ...(vary === "b" && { DiffusionBValue: (slice.echo - 1) * 1000 }),
               ScanningSequence: "GR",
             }
           : { KVP: 120 }),
@@ -131,7 +140,11 @@ export function writeSyntheticCt(
         WindowCenter: 40,
         WindowWidth: 400,
       },
-      { vr: "OW", Value: [slicePixels(slice.z, slice.echo).buffer] }
+      { vr: "OW", Value: [slicePixels(slice.z, slice.echo).buffer] },
+      vary === "siemens-b" && {
+        "00190010": { vr: "LO", Value: ["SIEMENS MR HEADER"] },
+        "0019100C": { vr: "IS", Value: [(slice.echo - 1) * 1000] },
+      }
     );
   }
   return { study, series, frameOfReference, slices };

@@ -285,16 +285,19 @@ become one multi-frame instance, with the frames in slice order and copied
 byte for byte. The new instance gets a new SOPInstanceUID. A stack of one
 image (for example a localizer) is not converted.
 
-A series with more than one image at a position — echoes, or the FAT,
-WATER, IN_PHASE and OPP_PHASE images of a Dixon series — has one volume for
-each EchoNumbers value and ImageType from value 4 on, in echo order.
-`--layout` selects the instances:
+A series with more than one image at a position — time points, b-values,
+echoes, or the FAT, WATER, IN_PHASE and OPP_PHASE images of a Dixon series —
+has one volume for each temporal position, b-value, EchoNumbers value and
+ImageType from value 4 on, in that order. The temporal position is
+TemporalPositionIdentifier, else AcquisitionNumber when that splits the
+series into clean stacks. The b-value is DiffusionBValue, else the private
+b-value of Siemens, GE or Philips. `--layout` selects the instances:
 
-| `--layout`        | Result                                                                |
-| ----------------- | --------------------------------------------------------------------- |
-| `split` (default) | one instance for each volume                                          |
-| `grouped`         | one instance: volume after volume; StackID is the volume number       |
-| `interleaved`     | one instance: by position, with the volumes in echo order at each one |
+| `--layout`        | Result                                                           |
+| ----------------- | ---------------------------------------------------------------- |
+| `split` (default) | one instance for each volume                                     |
+| `grouped`         | one instance: volume after volume; StackID is the volume number  |
+| `interleaved`     | one instance: by position, with the volumes in order at each one |
 
 The input is Part 10 files or directories (output with `-d`), or a
 Static-DICOMweb tree root or study directory (`studies/<uid>`). For a tree,
