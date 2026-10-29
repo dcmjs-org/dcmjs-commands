@@ -49,7 +49,9 @@ export function slicePixels(z, echo = 0) {
  * the volumes apart: "echo" (EchoNumbers), "time" (TemporalPositionIdentifier
  * 1, 2, ...), "acquisition" (AcquisitionNumber 1, 2, ...), "b"
  * (DiffusionBValue 0, 1000, ...) or "siemens-b" (the Siemens private
- * b-value), with EchoNumbers 1.
+ * b-value), with EchoNumbers 1. `offset` moves the slices of the second and
+ * later echoes by +/- `offset` mm along z. `oddType` gives slice index 1 its
+ * own ImageType value 4.
  *
  * @returns {{ study, series, frameOfReference,
  *   slices: Array<{ path, sop, z, echo }> }} `slices` is in volume order,
@@ -58,7 +60,14 @@ export function slicePixels(z, echo = 0) {
 export function writeSyntheticCt(
   dcmjs,
   dir,
-  { count = 4, photometric, echoes = 1, vary = "echo" } = {}
+  {
+    count = 4,
+    photometric,
+    echoes = 1,
+    vary = "echo",
+    offset = 0,
+    oddType = false,
+  } = {}
 ) {
   const { uid } = dcmjs.data.DicomMetaDictionary;
   const study = uid();
@@ -104,7 +113,12 @@ export function writeSyntheticCt(
         Modality: mr ? "MR" : "CT",
         SeriesNumber: 2,
         InstanceNumber: slice.number,
-        ImageType: ["ORIGINAL", "PRIMARY", mr ? "OTHER" : "AXIAL"],
+        ImageType: [
+          "ORIGINAL",
+          "PRIMARY",
+          mr ? "OTHER" : "AXIAL",
+          ...(oddType && i === 1 ? ["ODD"] : []),
+        ],
         ContentDate: "20260101",
         ContentTime: `0800${String(10 + i).padStart(2, "0")}`,
         AcquisitionNumber: vary === "acquisition" ? slice.echo : 1,
@@ -121,7 +135,11 @@ export function writeSyntheticCt(
             }
           : { KVP: 120 }),
         SliceLocation: slice.z,
-        ImagePositionPatient: [-4, -4, slice.z],
+        ImagePositionPatient: [
+          -4,
+          -4,
+          slice.echo > 1 ? slice.z + offset * (i % 2 ? 1 : -1) : slice.z,
+        ],
         ImageOrientationPatient: [1, 0, 0, 0, 1, 0],
         PixelSpacing: [0.5, 0.5],
         SliceThickness: 2,

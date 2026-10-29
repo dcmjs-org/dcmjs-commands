@@ -93,6 +93,10 @@ rules:
   some DICOM JSON writes it) is split first. The frames of a volume are sorted by their
   position along the slice normal, then by AcquisitionNumber, InstanceNumber and
   SOPInstanceUID.
+  - `positionSlots` gives each image a slot: the index of its position along the
+    normal. A position within 0.01 mm of the previous position has the same slot. The
+    stack test, the sort and the interleaved order compare slots, not raw positions.
+  - A group whose slots do not repeat is one volume, and is not split.
   - The temporal position is TemporalPositionIdentifier. When no image has it and
     positions repeat, AcquisitionNumber is the temporal position, but only if every
     volume then is a stack of 2 or more images. Many CT series give each slice its own
@@ -153,8 +157,10 @@ rules:
   series, sets the SeriesDescription to the first 49 characters of the source value and
   ` (multi-frame)`, and starts the InstanceNumber at 1. The SeriesNumber stays.
 - **LC-I7.** The Part 10 path reads each source with `readPart10Frames` and spools its frame;
-  `writePart10WithFrames` writes the file. Native little endian input becomes Explicit VR
-  Little Endian; encapsulated input keeps its transfer syntax. Each file goes to a temporary
+  `writePart10WithFrames` writes the file. Native little endian input and Deflated
+  Explicit VR Little Endian input become Explicit VR Little Endian; encapsulated input
+  keeps its transfer syntax. The tree path gunzips a `.mht.gz` frame file
+  (`frameToBuffer`). Each file goes to a temporary
   file and a rename puts it in place. An output path that is an input path is refused.
 - **LC-I8.** The tree path reads `metadata.gz` of each series, and gets the transfer syntax
   of each image from the multipart header of its first frame file. Before the grouping,
@@ -165,13 +171,20 @@ rules:
   numbers, and keeps the bytes for the other VRs. AT values are written as DICOM JSON
   strings of 8 hex characters (PS3.18 F.2.3).
 - **LC-I9.** With `--in-place`, the order of the writes is:
-  1. the frame files of each new instance (copies of `frames/1.mht[.gz]` of each source) and,
-     when the source instances have one, its own `metadata.gz` with instance-relative
-     BulkDataURI values, as create-dicomweb writes them;
+  1. the frame files of all new instances of the study (copies of `frames/1.mht[.gz]` of
+     each source) and, when the source instances have one, the own `metadata.gz` of each
+     new instance, with instance-relative BulkDataURI values, as create-dicomweb writes
+     them. An instance that fails gets an error in the report, its files are removed, and
+     the later steps leave it out, so its source images stay listed;
   2. the series `metadata.gz` of each changed or new series;
   3. `series-singleton.json.gz`, `instances/index.json.gz` and the series `index.json.gz`
      (each when the source series has it), then `series/index.json.gz`, the study
-     `index.json.gz`, and `studies/index.json.gz`.
+     `index.json.gz` and `study.json.gz`, and `studies/index.json.gz`.
+
+  An error in steps 2 or 3 is reported for the study, and the report is still printed.
+  The command does not change `series-natural.json.gz`. No reader in dcmjs-commands or
+  Static-DICOMweb uses that file. With `--new-series`, a series-qualified PixelData BulkDataURI gets the new
+  SeriesInstanceUID.
 
   The query files keep their form: tag-keyed DICOM JSON, or the keyword form that
   `dcmjs dicomweb` writes. A new series copies the query entries of its source series, and

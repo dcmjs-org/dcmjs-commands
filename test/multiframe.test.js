@@ -7,6 +7,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import zlib from "node:zlib";
+import { jest } from "@jest/globals";
 import dcmjs from "../src/dcmjsBundle.js";
 import { runMultiframe } from "../src/commands/multiframe.js";
 import { runDicomweb } from "../src/commands/dicomweb.js";
@@ -237,7 +238,6 @@ test("--in-place replaces the series metadata and query files, and keeps the old
       zlib.gzipSync(JSON.stringify([json]))
     );
   }
-  fs.mkdirSync(path.join(seriesDir, "instances"), { recursive: true });
   fs.writeFileSync(
     path.join(seriesDir, "instances", "index.json.gz"),
     zlib.gzipSync(
@@ -296,6 +296,9 @@ test("--in-place replaces the series metadata and query files, and keeps the old
   expect(Number(first(entry, "00201209"))).toBe(1);
   expect(
     Number(first(gz(path.join(studyDir, "index.json.gz"))[0], "00201208"))
+  ).toBe(1);
+  expect(
+    gz(path.join(studyDir, "study.json.gz"))[0].NumberOfStudyRelatedInstances
   ).toBe(1);
 });
 
@@ -375,9 +378,34 @@ test("--in-place --new-series on a study directory adds a series and keeps the s
   expect(Number(first(study, "00201208"))).toBe(5);
 });
 
-// API: the tree gives the same Part 10 file as the Part 10 input.
-test("-d from a tree writes the same frames as -d from the Part 10 files", async () => {
-  const { ct, root } = await makeTree("tree-d");
+// API: the tree gives the same Part 10 file as the Part 10 input, also
+// with gzipped frame files and with Deflated Part 10 files.
+test("-d from a tree with gzipped frames writes the same frames as -d from Deflated Part 10 files", async () => {
+  const { ct, root, seriesDir } = await makeTree("tree-d");
+  for (const slice of ct.slices) {
+    const frame = path.join(
+      seriesDir,
+      "instances",
+      slice.sop,
+      "frames",
+      "1.mht"
+    );
+    fs.writeFileSync(`${frame}.gz`, zlib.gzipSync(fs.readFileSync(frame)));
+    fs.rmSync(frame);
+  }
+  const { DicomMessage } = dcmjs.data;
+  const readDicom = (file) => {
+    const bytes = fs.readFileSync(file);
+    return DicomMessage.readFile(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)
+    );
+  };
+  for (const slice of ct.slices) {
+    const part10 = readDicom(slice.path);
+    part10.meta["00020010"].Value = ["1.2.840.10008.1.2.1.99"];
+    fs.writeFileSync(slice.path, Buffer.from(part10.write()));
+  }
+
   const fromTree = await multiframe([root], {
     directory: path.join(tmpDir, "tree-d-out"),
     json: true,
@@ -387,11 +415,81 @@ test("-d from a tree writes the same frames as -d from the Part 10 files", async
     directory: path.join(tmpDir, "tree-d-files"),
     json: true,
   });
+  expect(fromFiles.code).toBe(0);
+  const filesPath = JSON.parse(fromFiles.text).instances[0].path;
   const a = await readFile(JSON.parse(fromTree.text).instances[0].path);
-  const b = await readFile(JSON.parse(fromFiles.text).instances[0].path);
+  const b = await readFile(filesPath);
   expect(a.frames).toHaveLength(4);
   a.frames.forEach((frame, i) => expect(frame.equals(b.frames[i])).toBe(true));
   expect(first(a.dict, "00080016")).toBe(LEGACY_CT);
+  // Deflated input is written as Explicit VR Little Endian.
+  expect(first(readDicom(filesPath).meta, "00020010")).toBe(
+    "1.2.840.10008.1.2.1"
+  );
+});
+
+// User experience: a failed instance leaves the tree as it was, and the
+// report names the failure.
+test("--in-place leaves the series as it was when the frames of an instance cannot be copied", async () => {
+  const { ct, root, studyDir, seriesDir } = await makeTree("inplace-fail");
+  const before = fs.readFileSync(path.join(seriesDir, "metadata.gz"));
+  const copy = fs.copyFileSync;
+  const spy = jest.spyOn(fs, "copyFileSync").mockImplementation((from, to) => {
+    if (from.includes(ct.slices[2].sop)) {
+      throw new Error("EACCES: test copy failure");
+    }
+    return copy(from, to);
+  });
+  let result;
+  try {
+    result = await multiframe([root], { "in-place": true, json: true });
+  } finally {
+    spy.mockRestore();
+  }
+  const { code, text, err } = result;
+  expect(code).toBe(1);
+  const [failed] = JSON.parse(text).instances;
+  expect(failed.error).toContain("test copy failure");
+  expect(err).toContain(failed.sopInstanceUID);
+  expect(fs.readFileSync(path.join(seriesDir, "metadata.gz"))).toEqual(before);
+  expect(
+    fs.existsSync(path.join(seriesDir, "instances", failed.sopInstanceUID))
+  ).toBe(false);
+  expect(
+    Number(first(gz(path.join(studyDir, "index.json.gz"))[0], "00201208"))
+  ).toBe(4);
+});
+
+// User experience: volumes split only where positions repeat, and a small
+// offset between echoes keeps the echo order.
+test("splits volumes only at repeated positions, with a stable echo order", async () => {
+  const ct = writeSyntheticCt(dcmjs, path.join(tmpDir, "one-type"), {
+    oddType: true,
+  });
+  const single = await multiframe([path.join(tmpDir, "one-type")], {
+    directory: path.join(tmpDir, "one-type-out"),
+    json: true,
+  });
+  expect(single.code).toBe(0);
+  expect(JSON.parse(single.text).instances.map((i) => i.frames)).toEqual([
+    ct.slices.length,
+  ]);
+
+  const mr = writeSyntheticCt(dcmjs, path.join(tmpDir, "offset"), {
+    echoes: 2,
+    offset: 2e-4,
+  });
+  const { code, text } = await multiframe([path.join(tmpDir, "offset")], {
+    directory: path.join(tmpDir, "offset-out"),
+    layout: "interleaved",
+    json: true,
+  });
+  expect(code).toBe(0);
+  const { frames } = await readFile(JSON.parse(text).instances[0].path);
+  const order = [...mr.slices].sort((a, b) => a.z - b.z || a.echo - b.echo);
+  expect(frames).toEqual(
+    order.map((s) => Buffer.from(slicePixels(s.z, s.echo).buffer))
+  );
 });
 
 // User experience: corrective errors for the output options.

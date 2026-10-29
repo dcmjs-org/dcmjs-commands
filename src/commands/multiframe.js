@@ -7,21 +7,29 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-import crypto from "node:crypto";
-import { discoverDicomFiles, looksLikeStaticDicomWeb, pathKey } from "../io.js";
+import {
+  discoverDicomFiles,
+  looksLikeStaticDicomWeb,
+  pathKey,
+  tempPathFor,
+} from "../io.js";
 import {
   checkFrameCount,
   readPart10Frames,
   readPart10Header,
 } from "../pixel/frameReader.js";
 import { FrameSpool, writePart10WithFrames } from "../pixel/frameWriter.js";
-import { isLittleEndianNative } from "../pixel/transferSyntaxes.js";
+import {
+  EXPLICIT_LITTLE_ENDIAN,
+  isLittleEndianNative,
+  pixelLayoutSyntax,
+} from "../pixel/transferSyntaxes.js";
 import {
   LAYOUTS,
   buildLegacyConverted,
   groupInstances,
 } from "../enhanced/legacyConverted.js";
-import { loadJson, saveJson } from "../utils/index.js";
+import { fixValue, loadJson, saveJson } from "../utils/index.js";
 import { frameToBuffer } from "../utils/streamToBuffer.js";
 import { StaticDicomWebAccess } from "../staticdicomweb/StaticDicomWebAccess.js";
 
@@ -58,12 +66,13 @@ Options:
                           SeriesDescription. The source series do not change,
                           so a viewer shows the old and the new images.
   --layout <layout>       a series with more than one image at a position
-                          (echoes, or Dixon FAT, WATER, IN_PHASE, OPP_PHASE):
-                            split        one instance for each echo and
-                                         image type (default)
-                            grouped      one instance, echo after echo
+                          (time points, b-values, echoes, or Dixon FAT,
+                          WATER, IN_PHASE, OPP_PHASE) has one volume for each:
+                            split        one instance for each volume
+                                         (default)
+                            grouped      one instance, volume after volume
                             interleaved  one instance, by position, with
-                                         the echoes in order at each position
+                                         the volumes in order at each position
   -S, --study <uid>       only this study (repeatable; tree root input only)
   --series <uid>          only this series (repeatable)
   --dry-run               print the planned instances; write nothing
@@ -80,7 +89,6 @@ const SERIES_DESCRIPTION = "0008103E";
 const INSTANCE_NUMBER = "00200013";
 const NUMBER_OF_FRAMES = "00280008";
 const PIXEL_DATA = "7FE00010";
-const EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1";
 /** The ImplementationClassUID of the files that `multiframe` writes. */
 const IMPLEMENTATION_CLASS_UID = "2.25.153674331502755447381779073915979849773";
 
@@ -155,10 +163,7 @@ async function writeFile({
   addFrames,
 }) {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  const tempPath = path.join(
-    path.dirname(outputPath),
-    `.${path.basename(outputPath)}.${crypto.randomBytes(4).toString("hex")}.tmp`
-  );
+  const tempPath = tempPathFor(outputPath);
   const spool = new FrameSpool(tempPath);
   try {
     await addFrames(spool);
@@ -290,10 +295,11 @@ async function runPart10({ dcmjs, positionals, values, report }) {
           dcmjs,
           inputPath: file,
         });
+        // A Deflated file has the pixel layout of Explicit VR LE.
         records.push({
           id: file,
           dict,
-          transferSyntaxUID: first(meta, "00020010"),
+          transferSyntaxUID: pixelLayoutSyntax(first(meta, "00020010")),
         });
       } catch (err) {
         report.unreadable.push({ file, error: err.message });
@@ -412,7 +418,7 @@ async function readStudy(root, studyUID) {
  *   and added to `unknown`.
  */
 function datasetOf(dcmjs, json, unknown) {
-  const { dictionary } = dcmjs.data.DicomMetaDictionary;
+  const { dictionary, punctuateTag } = dcmjs.data.DicomMetaDictionary;
   const dedupped = new Set(
     Object.keys(json)
       .filter(
@@ -433,9 +439,7 @@ function datasetOf(dcmjs, json, unknown) {
     ) {
       continue;
     }
-    const vr =
-      element?.vr ??
-      dictionary[`(${tag.slice(0, 4)},${tag.slice(4)})`.toUpperCase()]?.vr;
+    const vr = element?.vr ?? dictionary[punctuateTag(tag.toUpperCase())]?.vr;
     if (!vr) {
       unknown.add(tag.toUpperCase());
       continue;
@@ -510,7 +514,11 @@ function binaryValue(vr, bytes) {
   );
 }
 
-/** Fills each BulkDataURI and InlineBinary value of `json` with its data. */
+/**
+ * Fills each BulkDataURI and InlineBinary value of `json` with its data.
+ * `DicomAccess.importBulkdata` keeps numeric values as bytes and does not
+ * wait for nested items, so this command has its own copy.
+ */
 async function importBulkdata(instance, json) {
   for (const [tag, element] of Object.entries(json)) {
     if (element?.vr === "SQ") {
@@ -531,8 +539,8 @@ async function importBulkdata(instance, json) {
           Buffer.from(element.InlineBinary, "base64")
         ),
       };
-    } else if (element?.vr === "CS" && element.Value?.length === 1) {
-      element.Value = String(element.Value[0]).split("\\");
+    } else {
+      fixValue(element);
     }
   }
   delete json[PIXEL_DATA];
@@ -707,7 +715,9 @@ async function writeTreeInstance(plan, seriesDir) {
   );
   plan.dict[PIXEL_DATA] = {
     vr: sourcePixel.vr ?? "OW",
-    BulkDataURI: uri.replace(sources[0].id, plan.sop),
+    BulkDataURI: uri
+      .replace(sources[0].id, plan.sop)
+      .replace(`series/${plan.stack.seriesUID}/`, `series/${plan.seriesUID}/`),
   };
   const sourceMetadata = await loadJson(
     sources[0].instanceDir,
@@ -725,10 +735,38 @@ async function writeTreeInstance(plan, seriesDir) {
   plan.entry.path = newDir;
 }
 
-/** Adds `instances` and `series` to the counts of the study query files. */
+/**
+ * Writes the instance files of each plan into the series dir `dirOf(plan)`
+ * before any metadata or query file changes. A plan that fails gets
+ * `entry.error`, its partial files are removed, and it is left out of the
+ * returned plans, so its source images stay listed.
+ */
+async function writeTreeInstances(plans, dirOf) {
+  const written = [];
+  for (const plan of plans) {
+    try {
+      await writeTreeInstance(plan, dirOf(plan));
+      written.push(plan);
+    } catch (err) {
+      plan.entry.error = err.message;
+      delete plan.entry.path;
+      fs.rmSync(path.join(dirOf(plan), "instances", plan.sop), {
+        recursive: true,
+        force: true,
+      });
+    }
+  }
+  return written;
+}
+
+/**
+ * Adds `instances` and `series` to the counts of the study query files,
+ * and of the natural `study.json.gz` that `dcmjs dicomweb` writes.
+ */
 async function addStudyCounts(root, studyDir, studyUID, { instances, series }) {
   for (const [dir, name] of [
     [studyDir, "index.json.gz"],
+    [studyDir, "study.json.gz"],
     [path.join(root, "studies"), "index.json.gz"],
   ]) {
     const index = await loadJson(dir, name, null);
@@ -774,6 +812,13 @@ function plansBySeries(plans) {
  * never finds a series that lists an instance whose frames are not there.
  */
 async function replaceInTree({ root, studyUID, studyDir, series, plans }) {
+  plans = await writeTreeInstances(
+    plans,
+    (plan) => series.get(plan.seriesUID).dir
+  );
+  if (!plans.length) {
+    return;
+  }
   const converted = new Set(
     plans.flatMap((plan) => plan.stack.instances.map((i) => i.id))
   );
@@ -781,9 +826,6 @@ async function replaceInTree({ root, studyUID, studyDir, series, plans }) {
   let studyDelta = 0;
   for (const [seriesUID, seriesPlans] of plansBySeries(plans)) {
     const { dir, metadata } = series.get(seriesUID);
-    for (const plan of seriesPlans) {
-      await writeTreeInstance(plan, dir);
-    }
     const added = seriesPlans.map((plan) => plan.dict);
     const next = [
       ...metadata.filter((json) => !converted.has(first(json, SOP_INSTANCE))),
@@ -845,15 +887,18 @@ function newSeriesEntry(entry, { seriesUID, description, instances, frames }) {
  * series. The source series do not change.
  */
 async function addSeriesToTree({ root, studyUID, studyDir, series, plans }) {
+  plans = await writeTreeInstances(plans, (plan) =>
+    path.join(studyDir, "series", plan.seriesUID)
+  );
+  if (!plans.length) {
+    return;
+  }
   const seriesIndex = await loadJson(studyDir, "series/index.json.gz", null);
   let instances = 0;
   const bySeries = plansBySeries(plans);
   for (const [seriesUID, seriesPlans] of bySeries) {
     const source = series.get(seriesPlans[0].stack.seriesUID);
     const dir = path.join(studyDir, "series", seriesUID);
-    for (const plan of seriesPlans) {
-      await writeTreeInstance(plan, dir);
-    }
     const added = seriesPlans.map((plan) => plan.dict);
     await saveJson(dir, "metadata.gz", added);
     instances += added.length;
@@ -957,12 +1002,16 @@ async function runTree({ dcmjs, tree, values, report }) {
     if (values["dry-run"] || !plans.length) {
       continue;
     }
-    if (!values["in-place"]) {
-      await treeToPart10({ dcmjs, root, studyUID, plans, values });
-    } else if (values["new-series"]) {
-      await addSeriesToTree({ root, studyUID, studyDir, series, plans });
-    } else {
-      await replaceInTree({ root, studyUID, studyDir, series, plans });
+    try {
+      if (!values["in-place"]) {
+        await treeToPart10({ dcmjs, root, studyUID, plans, values });
+      } else if (values["new-series"]) {
+        await addSeriesToTree({ root, studyUID, studyDir, series, plans });
+      } else {
+        await replaceInTree({ root, studyUID, studyDir, series, plans });
+      }
+    } catch (err) {
+      report.errors.push({ study: studyUID, error: err.message });
     }
   }
 }

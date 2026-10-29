@@ -40,7 +40,7 @@ export const tagOf = (keyword) => {
   if (!entry) {
     throw new Error(`unknown keyword ${keyword}`);
   }
-  return entry.tag.replace(/[(),]/g, "");
+  return DicomMetaDictionary.unpunctuateTag(entry.tag);
 };
 const vrOf = (keyword) => DicomMetaDictionary.nameMap[keyword].vr;
 const el = (keyword, ...Value) => ({ vr: vrOf(keyword), Value });
@@ -552,51 +552,92 @@ const byNumber = (a, b) =>
  * order along the normal; images at one position keep the order of
  * AcquisitionNumber, InstanceNumber and SOPInstanceUID.
  *
- * The temporal position is TemporalPositionIdentifier. When no image has
- * one and positions repeat, AcquisitionNumber is the temporal position if
- * it makes every volume a stack of 2 or more images (the phases of a
- * dynamic series). It is not used otherwise, because many CT series give
- * each slice its own AcquisitionNumber.
+ * A group whose positions do not repeat is one volume. The temporal
+ * position is TemporalPositionIdentifier. When no image has one,
+ * AcquisitionNumber is the temporal position if it makes every volume a
+ * stack of 2 or more images (the phases of a dynamic series). It is not
+ * used otherwise, because many CT series give each slice its own
+ * AcquisitionNumber.
  */
 function volumesOf(group) {
-  const volumes = volumesBy(group, T.TemporalPositionIdentifier);
+  const slotOf = positionSlots(group);
+  const whole = volumesBy(group, slotOf, {});
+  if (whole[0].isStack) {
+    return whole;
+  }
+  const volumes = volumesBy(group, slotOf, {
+    timeTag: T.TemporalPositionIdentifier,
+  });
   if (
     volumes.every((volume) => volume.isStack) ||
     volumes.some((volume) => volume.time !== null)
   ) {
     return volumes;
   }
-  const phases = volumesBy(group, T.AcquisitionNumber, "acquisition");
+  const phases = volumesBy(group, slotOf, {
+    timeTag: T.AcquisitionNumber,
+    timeName: "acquisition",
+  });
   return phases.every((v) => v.isStack && v.sorted.length > 1)
     ? phases
     : volumes;
 }
 
-/** The volumes of `volumesOf`, with `timeTag` as the temporal position. */
-function volumesBy(group, timeTag, timeName = "time") {
-  const position = ({ dict }) => {
-    const p = numbers(dict, T.ImagePositionPatient);
-    return (
-      p[0] * group.normal[0] + p[1] * group.normal[1] + p[2] * group.normal[2]
-    );
-  };
+/** Positions (mm along the normal) closer than this are one position. */
+const SLOT_TOLERANCE = 0.01;
+
+/**
+ * The slot of each instance of a group: the index of its position along
+ * the normal, where positions within `SLOT_TOLERANCE` of the previous one
+ * share a slot. Volumes and the interleaved order compare slots, so a small
+ * offset between echoes does not change their order.
+ */
+function positionSlots(group) {
+  const at = group.instances.map((instance) => {
+    const p = numbers(instance.dict, T.ImagePositionPatient);
+    return {
+      instance,
+      at:
+        p[0] * group.normal[0] +
+        p[1] * group.normal[1] +
+        p[2] * group.normal[2],
+    };
+  });
+  at.sort((a, b) => a.at - b.at);
+  const slots = new Map();
+  let slot = 0;
+  at.forEach((entry, i) => {
+    if (i && entry.at - at[i - 1].at > SLOT_TOLERANCE) {
+      slot++;
+    }
+    slots.set(entry.instance, slot);
+  });
+  return (instance) => slots.get(instance);
+}
+
+/**
+ * The volumes of `volumesOf`, with `timeTag` as the temporal position.
+ * With no `timeTag`, the group is one volume.
+ */
+function volumesBy(group, slotOf, { timeTag, timeName = "time" }) {
   const rank = (dict) => [
     Number(first(dict, T.AcquisitionNumber) ?? 0),
     Number(first(dict, T.InstanceNumber) ?? 0),
     String(first(dict, T.SOPInstanceUID)),
   ];
+  const split = Boolean(timeTag);
   const byKey = new Map();
   for (const instance of group.instances) {
     const { dict } = instance;
-    const time = numberOrNull(dict, timeTag);
-    const bValue = bValueOf(dict);
-    const echo = Number(first(dict, T.EchoNumbers) ?? 0);
-    const type = strings(dict, T.ImageType).slice(3).join("\\");
+    const time = split ? numberOrNull(dict, timeTag) : null;
+    const bValue = split ? bValueOf(dict) : null;
+    const echo = split ? Number(first(dict, T.EchoNumbers) ?? 0) : 0;
+    const type = split ? strings(dict, T.ImageType).slice(3).join("\\") : "";
     const key = JSON.stringify([time, bValue, echo, type]);
     if (!byKey.has(key)) {
       byKey.set(key, { time, bValue, echo, type, instances: [] });
     }
-    byKey.get(key).instances.push({ instance, at: position(instance) });
+    byKey.get(key).instances.push({ instance, slot: slotOf(instance) });
   }
   const volumes = [...byKey.values()].sort(
     (a, b) =>
@@ -616,8 +657,8 @@ function volumesBy(group, timeTag, timeName = "time") {
   };
   return volumes.map((volume, v) => {
     const sorted = volume.instances.sort((a, b) => {
-      if (Math.abs(a.at - b.at) > 1e-4) {
-        return a.at - b.at;
+      if (a.slot !== b.slot) {
+        return a.slot - b.slot;
       }
       const [ra, rb] = [rank(a.instance.dict), rank(b.instance.dict)];
       return ra[0] - rb[0] || ra[1] - rb[1] || ra[2].localeCompare(rb[2]);
@@ -638,9 +679,7 @@ function volumesBy(group, timeTag, timeName = "time") {
           : "",
       stackId: String(v + 1),
       time: volume.time,
-      isStack: sorted.every(
-        (s, i) => !i || Math.abs(s.at - sorted[i - 1].at) > 1e-4
-      ),
+      isStack: sorted.every((s, i) => !i || s.slot !== sorted[i - 1].slot),
       sorted,
     };
   });
@@ -655,9 +694,7 @@ function interleave(volumes) {
   return volumes
     .flatMap(framesOf)
     .map((frame, order) => ({ ...frame, order }))
-    .sort((a, b) =>
-      Math.abs(a.at - b.at) > 1e-4 ? a.at - b.at : a.order - b.order
-    );
+    .sort((a, b) => a.slot - b.slot || a.order - b.order);
 }
 
 /**
@@ -798,7 +835,9 @@ function frameMacros(dict, target) {
       AnatomicRegionSequence: region,
       FrameLaterality: el(
         "FrameLaterality",
-        first(dict, T.ImageLaterality) ?? first(dict, T.Laterality) ?? "U"
+        [first(dict, T.ImageLaterality), first(dict, T.Laterality)].find(
+          (value) => ["R", "L", "B", "U"].includes(value)
+        ) ?? "U"
       ),
     });
   }
@@ -1051,7 +1090,7 @@ export function buildLegacyConverted({
 
   if (dimensionOrganization) {
     const pointer = (keyword) =>
-      json ? tagOf(keyword) : parseInt(tagOf(keyword), 16);
+      json ? tagOf(keyword) : DicomMetaDictionary.tagAsIntegerFromName(keyword);
     Object.assign(
       dict,
       item({
