@@ -6,6 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { once } from "node:events";
 
 /**
@@ -45,6 +46,16 @@ export function pathKey(file, { foldCase = false } = {}) {
     ? key.toLowerCase()
     : key;
 }
+
+/**
+ * A hidden temporary path next to `target`, for a write that a rename puts
+ * in place, so a failed write leaves no partial file.
+ */
+export const tempPathFor = (target) =>
+  path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${crypto.randomBytes(4).toString("hex")}.tmp`
+  );
 
 /** Read a file as an exact ArrayBuffer. */
 export function readFileArrayBuffer(filePath) {

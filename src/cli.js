@@ -21,6 +21,7 @@ import {
 } from "./commands/patientAccess.js";
 import { runTranscode, transcodeUsage } from "./commands/transcode.js";
 import { runWsiResize, wsiResizeUsage } from "./commands/wsiresize.js";
+import { runMultiframe, multiframeUsage } from "./commands/multiframe.js";
 
 export const usage = `usage: dcmjs <command> [options]
 
@@ -35,6 +36,8 @@ Commands:
     dicomweb    publish a directory of DICOM files as a Static-DICOMweb tree
     transcode   rewrite pixel data in another transfer syntax, frame by frame
     wsiresize   rebuild a whole-slide image pyramid (tile size, levels, codec)
+    multiframe  convert single-frame CT/MR/PET to Legacy Converted Enhanced
+                multi-frame images (Part 10 or a Static-DICOMweb tree)
     patient-access
                 fetch a patient's imaging studies via SMART Imaging Access
                 (FHIR discovery → App Launch → WADO-RS retrieval)
@@ -178,6 +181,21 @@ const COMMANDS = {
       "dry-run": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       quiet: { type: "boolean", short: "q", default: false },
+      help: { type: "boolean", short: "h", default: false },
+    },
+  },
+  multiframe: {
+    run: runMultiframe,
+    usage: multiframeUsage,
+    options: {
+      directory: { type: "string", short: "d" },
+      "in-place": { type: "boolean", default: false },
+      "new-series": { type: "boolean", default: false },
+      layout: { type: "string" },
+      study: { type: "string", short: "S", multiple: true },
+      series: { type: "string", multiple: true },
+      "dry-run": { type: "boolean", default: false },
+      json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   },

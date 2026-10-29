@@ -31,12 +31,12 @@ What you can do with them:
 
 Four bins ship with the package:
 
-| Bin          | Purpose                                                                                                                                                                    |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb, transcode, wsiresize — plus patient-access (SMART Imaging Access retrieval) |
-| `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                                                     |
-| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                                         |
-| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                                                  |
+| Bin          | Purpose                                                                                                                                                                                |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb, transcode, wsiresize, multiframe — plus patient-access (SMART Imaging Access retrieval) |
+| `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                                                                 |
+| `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                                                     |
+| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                                                              |
 
 For a worked tour of every command with runnable examples, see
 [EXAMPLES.md](EXAMPLES.md). For where the tooling is headed (library-level
@@ -275,6 +275,52 @@ Expect long runs on large slides: a 229079 x 98511 JPEG slide (5 levels,
 9.1 GB) took 15 h 10 min with `jxl-high` on one thread, and came out at
 4.3 GB (-52.5% image bytes). Sample times and sizes are in the
 [specification](docs/specs/transcode-and-wsiresize.md#measured-results).
+
+### multiframe
+
+Convert classic single-frame CT, MR and PET images to Legacy Converted
+Enhanced CT, MR and PET images (PS3.3 A.70 to A.72). The images of one
+series, frame of reference, orientation, pixel layout and transfer syntax
+become one multi-frame instance, with the frames in slice order and copied
+byte for byte. The new instance gets a new SOPInstanceUID. A stack of one
+image (for example a localizer) is not converted.
+
+A series with more than one image at a position — time points, b-values,
+echoes, or the FAT, WATER, IN_PHASE and OPP_PHASE images of a Dixon series —
+has one volume for each temporal position, b-value, EchoNumbers value and
+ImageType from value 4 on, in that order. The temporal position is
+TemporalPositionIdentifier, else AcquisitionNumber when that splits the
+series into clean stacks. The b-value is DiffusionBValue, else the private
+b-value of Siemens, GE or Philips. `--layout` selects the instances:
+
+| `--layout`        | Result                                                           |
+| ----------------- | ---------------------------------------------------------------- |
+| `split` (default) | one instance for each volume                                     |
+| `grouped`         | one instance: volume after volume; StackID is the volume number  |
+| `interleaved`     | one instance: by position, with the volumes in order at each one |
+
+The input is Part 10 files or directories (output with `-d`), or a
+Static-DICOMweb tree root or study directory (`studies/<uid>`). For a tree,
+`-d` writes Part 10 files, and `--in-place` updates the tree: the series
+metadata and the query files list the new instances in place of the
+converted images. The files of the converted images stay in the tree; a
+later cleanup can remove them. With `--new-series`, the new instances go to
+a new series for each source series, with "(multi-frame)" added to the
+SeriesDescription, and the source series do not change, so a viewer shows
+the old and the new images next to each other.
+
+References to the converted images in SR, SEG, KO and other instances do
+not change.
+
+```bash
+dcmjs multiframe ./study-dir -d ./enhanced          # Part 10 in, Part 10 out
+dcmjs multiframe ./dicomweb --dry-run               # list the planned instances
+dcmjs multiframe ./dicomweb/studies/<StudyInstanceUID> --in-place --new-series
+dcmjs multiframe ./dicomweb --in-place --series <SeriesInstanceUID> --layout grouped
+```
+
+See the [specification](docs/specs/legacy-converted-multiframe.md) for the
+placement of the attributes and the limits.
 
 ### patient-access
 
