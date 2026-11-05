@@ -225,7 +225,9 @@ frames (uncompressed pixel data is held whole, up to 2 GiB). Files are replaced 
 unless `-d` names an output directory. JPEG Baseline whole-slide images
 recompress losslessly to JPEG XL (`jxl-jpeg`, 1.2.840.10008.1.2.4.111),
 and `--to jpeg` gives back the same JPEG bytes. Lossy targets need
-`--lossy` and get a new SOPInstanceUID. `rle` and `deflate` are lossless,
+`--lossy` and get a new SOPInstanceUID. `jls` (JPEG-LS, 1.2.840.10008.1.2.4.80)
+and `htj2k` (HTJ2K, 1.2.840.10008.1.2.4.201) are lossless.
+`rle` and `deflate` are lossless,
 and are the targets for BINARY segmentations (Bits Allocated 1). The
 written PhotometricInterpretation always matches the written samples:
 native YBR_FULL_422 written as rle or deflate becomes YBR_FULL. The command prints instances,
@@ -387,6 +389,43 @@ half:
 - `studies/<studyUID>/series/<seriesUID>/instances/<sopUID>/frames/<n>.mht[.gz]` — frame data
 
 Uncompressed variants are accepted, but will not be found on a search.
+
+## Library: `@dcmjs/commands/pixel`
+
+The per-frame codec API for other programs: `decodeFrame`, `encodeFrame`,
+`transcodeFrame`, `isBitstreamTranscode`, `imageInfoFromDict`, `hasDecoder`,
+the header helpers `photometricAfter` and `updatePixelHeader`, the output
+syntax table (`OUTPUT_SYNTAXES`, `resolveOutputSyntax`, the UID constants),
+and the compression rule `selectTargetSyntax`.
+
+```js
+import { selectTargetSyntax, transcodeFrame, imageInfoFromDict } from "@dcmjs/commands/pixel";
+
+const { target, reason } = selectTargetSyntax(metadata, { incomingTransferSyntax });
+const stored = target
+  ? await transcodeFrame(frame, imageInfoFromDict(metadata), incomingTransferSyntax, target)
+  : frame;
+```
+
+The default rule (`DEFAULT_RULES`, first match wins; `null` keeps the frame):
+
+| Instance | Input | Target |
+| --- | --- | --- |
+| Video SOP class, or video transfer syntax | any | keep |
+| Whole-slide image | JPEG Baseline (`.4.50`) | JPEG XL JPEG Recompression (`.4.111`) |
+| Segmentation | any | Deflated Image Frame (`1.2.840.10008.1.2.8.1`) |
+| Colour | JPEG Baseline | `.4.111` |
+| Colour | lossless | JPEG XL Lossless (`.4.110`) |
+| Colour | other lossy | JPEG XL (`.4.112`) |
+| Grayscale | compressed | keep |
+| Grayscale | uncompressed | JPEG-LS Lossless (`.4.80`) |
+
+Without `incomingTransferSyntax`, the rule uses AvailableTransferSyntaxUID
+or TransferSyntaxUID of the metadata, and else assumes Explicit VR Little
+Endian (JPEG Baseline for a whole-slide image). A target that the codecs
+cannot write for the frame (1-bit data, YBR_FULL, lossy PALETTE COLOR)
+keeps the frame, and `reason` says why. Pass `rules` (a JSON table of the
+same shape) to replace the default.
 
 ## Development
 

@@ -61,7 +61,9 @@ rules:
   - The instance creation, series and content date and time get the time of the run.
   - The pixel data does not change, unless `--to` asks for a different transfer syntax.
 - **TC-U11.** The user can write RLE Lossless (`rle`, `1.2.840.10008.1.2.5`) and Deflated
-  Image Frame Compression (`deflate`, `1.2.840.10008.1.2.8.1`). Both are lossless.
+  Image Frame Compression (`deflate`, `1.2.840.10008.1.2.8.1`). Both are lossless. The user
+  can also write JPEG-LS Lossless (`jls`, `1.2.840.10008.1.2.4.80`) and HTJ2K Lossless
+  (`htj2k`, `1.2.840.10008.1.2.4.201`), for 8-bit and 16-bit data.
 - **TC-U12.** The user can convert a BINARY segmentation (Bits Allocated 1) to and from
   explicit-le, rle and deflate, and every bit stays the same (PS3.5 CP-2301, Sup 244). The
   command refuses other targets for Bits Allocated 1.

@@ -6,6 +6,8 @@
 
 export const EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1";
 export const JPEG_BASELINE = "1.2.840.10008.1.2.4.50";
+export const JPEG_LS_LOSSLESS = "1.2.840.10008.1.2.4.80";
+export const HTJ2K_LOSSLESS = "1.2.840.10008.1.2.4.201";
 export const JPEG_XL_LOSSLESS = "1.2.840.10008.1.2.4.110";
 export const JPEG_XL_JPEG_RECOMPRESSION = "1.2.840.10008.1.2.4.111";
 export const JPEG_XL = "1.2.840.10008.1.2.4.112";
@@ -18,7 +20,7 @@ export const DEFLATED_IMAGE_FRAME = "1.2.840.10008.1.2.8.1";
  * `bytePreserving` syntaxes keep the native frame bytes exactly, so they
  * take any photometric and Bits Allocated 1 (PS3.5 CP-2301, Sup 244).
  */
-const OUTPUT_SYNTAXES = [
+export const OUTPUT_SYNTAXES = [
   {
     uid: EXPLICIT_LITTLE_ENDIAN,
     aliases: ["explicit-le", "native", "uncompressed"],
@@ -50,6 +52,20 @@ const OUTPUT_SYNTAXES = [
     encapsulated: true,
     lossy: true,
     method: "ISO_10918_1",
+  },
+  {
+    uid: JPEG_LS_LOSSLESS,
+    aliases: ["jls", "jpeg-ls"],
+    name: "JPEG-LS Lossless",
+    encapsulated: true,
+    lossy: false,
+  },
+  {
+    uid: HTJ2K_LOSSLESS,
+    aliases: ["htj2k", "htj2k-lossless"],
+    name: "HTJ2K Lossless",
+    encapsulated: true,
+    lossy: false,
   },
   {
     uid: JPEG_XL_LOSSLESS,

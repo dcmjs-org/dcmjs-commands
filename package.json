@@ -27,7 +27,8 @@
   "license": "MIT",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./pixel": "./src/pixel/index.js"
   },
   "files": [
     "bin",
