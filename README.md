@@ -415,17 +415,27 @@ The default rule (`DEFAULT_RULES`, first match wins; `null` keeps the frame):
 | Whole-slide image | JPEG Baseline (`.4.50`) | JPEG XL JPEG Recompression (`.4.111`) |
 | Segmentation | any | Deflated Image Frame (`1.2.840.10008.1.2.8.1`) |
 | Colour | JPEG Baseline | `.4.111` |
-| Colour | lossless | JPEG XL Lossless (`.4.110`) |
-| Colour | other lossy | JPEG XL (`.4.112`) |
-| Grayscale | compressed | keep |
+| Colour | uncompressed | JPEG XL Lossless (`.4.110`) |
+| Any | other compressed | keep |
 | Grayscale | uncompressed | JPEG-LS Lossless (`.4.80`) |
 
-Without `incomingTransferSyntax`, the rule uses AvailableTransferSyntaxUID
-or TransferSyntaxUID of the metadata, and else assumes Explicit VR Little
-Endian (JPEG Baseline for a whole-slide image). A target that the codecs
-cannot write for the frame (1-bit data, YBR_FULL, lossy PALETTE COLOR)
-keeps the frame, and `reason` says why. Pass `rules` (a JSON table of the
-same shape) to replace the default.
+Compressed input other than JPEG Baseline (for example JPEG 2000) is
+re-encoded only by a rule that names it. Without `incomingTransferSyntax`,
+the rule uses AvailableTransferSyntaxUID or TransferSyntaxUID of the
+metadata, and else assumes native little endian, for every SOP class. A
+target that the codecs cannot write exactly for the frame keeps the frame,
+and `reason` says why: 1-bit data, YBR_FULL, lossy PALETTE COLOR, and a bit
+depth over the limit of the target. Pass `rules` (a JSON table of the same
+shape) to replace the default; an unknown `when` key or target fails at the
+first call, whether or not the rule matches.
+
+Known limits of the codecs (DICOM permits more):
+
+- JPEG-LS, JPEG XL and HTJ2K write at most 16 bits per sample. A 32-bit
+  frame (RT Dose, a parametric map) stays native by default; `deflate` and
+  `rle` keep its bytes exactly.
+- HTJ2K writes colour at 8 bits only, because the codec changes the values
+  of 16-bit colour frames. 16-bit RGB goes to JPEG XL Lossless by default.
 
 ## Development
 

@@ -10,9 +10,9 @@ import {
   EXPLICIT_LITTLE_ENDIAN,
   JPEG_BASELINE,
   JPEG_LS_LOSSLESS,
-  JPEG_XL,
   JPEG_XL_JPEG_RECOMPRESSION,
   JPEG_XL_LOSSLESS,
+  bitDepthLimit,
   isNativeSyntax,
   resolveOutputSyntax,
 } from "./transferSyntaxes.js";
@@ -42,9 +42,11 @@ const LOSSY_SYNTAXES = [
 /**
  * The default rule table; first match wins. `target: null` keeps the frame
  * as it arrived. A `when` condition that is absent matches anything:
- * `video`, `colour`, `compressed`, `lossyInput` (booleans), `sopClassUID`
- * and `incoming` (lists of UIDs). A JSON table of the same shape can
- * replace it.
+ * `video`, `colour`, `compressed`, `lossyInput` (booleans), `sopClassUID`,
+ * `incoming` (lists of UIDs) and `bitsAllocated` (a number or a list). A
+ * JSON table of the same shape can replace it. Compressed input other than
+ * JPEG Baseline is re-encoded only by a rule that names it; the default
+ * keeps it.
  */
 export const DEFAULT_RULES = [
   { when: { video: true }, target: null, reason: "video" },
@@ -68,11 +70,10 @@ export const DEFAULT_RULES = [
     reason: "colour JPEG",
   },
   {
-    when: { colour: true, lossyInput: false },
+    when: { colour: true, compressed: false },
     target: JPEG_XL_LOSSLESS,
-    reason: "colour lossless",
+    reason: "colour uncompressed",
   },
-  { when: { colour: true }, target: JPEG_XL, reason: "colour lossy" },
   { when: { compressed: true }, target: null, reason: "already compressed" },
   {
     when: { colour: false, compressed: false },
@@ -82,6 +83,43 @@ export const DEFAULT_RULES = [
 ];
 
 const first = (dict, tag) => dict?.[tag]?.Value?.[0];
+
+const WHEN_KEYS = [
+  "video",
+  "colour",
+  "compressed",
+  "lossyInput",
+  "sopClassUID",
+  "incoming",
+  "bitsAllocated",
+];
+const checkedTables = new WeakSet();
+
+/**
+ * Throws for a rule that can never work: a `when` key that is not a fact
+ * (a typo matches nothing), or a target that is not an output syntax.
+ * Runs once for each table object.
+ */
+function checkRules(rules) {
+  if (checkedTables.has(rules)) return;
+  rules.forEach(({ when = {}, target }, index) => {
+    const unknown = Object.keys(when).find((key) => !WHEN_KEYS.includes(key));
+    if (unknown) {
+      throw new Error(
+        `rule ${index}: unknown 'when' key '${unknown}' — use one of ` +
+          WHEN_KEYS.join(", ")
+      );
+    }
+    if (target != null) {
+      try {
+        resolveOutputSyntax(target);
+      } catch (error) {
+        throw new Error(`rule ${index}: ${error.message}`);
+      }
+    }
+  });
+  checkedTables.add(rules);
+}
 
 function matches(when, facts) {
   return Object.entries(when).every(([key, expected]) =>
@@ -95,6 +133,13 @@ function matches(when, facts) {
 function limitOf(target, facts, metadata) {
   if (facts.bitsAllocated === 1 && !target.bytePreserving) {
     return "Bits Allocated 1 needs explicit-le, rle or deflate";
+  }
+  const depth = bitDepthLimit(target, {
+    bitsAllocated: facts.bitsAllocated,
+    samplesPerPixel: first(metadata, "00280002") ?? 1,
+  });
+  if (depth) {
+    return depth;
   }
   if (
     target.uid === JPEG_XL_JPEG_RECOMPRESSION &&
@@ -121,26 +166,28 @@ function limitOf(target, facts, metadata) {
  * @param {object} [options]
  * @param {string} [options.incomingTransferSyntax] the syntax of the frame
  *   response. Without it, AvailableTransferSyntaxUID or TransferSyntaxUID of
- *   the metadata; without those, Explicit VR Little Endian is assumed, and
- *   JPEG Baseline for WSI.
+ *   the metadata; without those, native little endian (the same frame bytes
+ *   in Implicit and Explicit VR) is assumed, for every SOP class.
  * @param {object[]} [options.rules] a table that replaces DEFAULT_RULES.
  * @returns {{ target: string | null, reason: string }} `target: null` keeps
  *   the frame unchanged. A target that is the same as the input, or that the
- *   codecs cannot write for this frame (1-bit data, YBR_FULL, lossy PALETTE
- *   COLOR), also gives `null`, and `reason` says why.
- * @throws when a rule names a target that is not in OUTPUT_SYNTAXES.
+ *   codecs cannot write exactly for this frame (1-bit data, a bit depth over
+ *   `maxBits` of the target, YBR_FULL, lossy PALETTE COLOR), also gives
+ *   `null`, and `reason` says why.
+ * @throws when a rule has an unknown `when` key, or names a target that is
+ *   not in OUTPUT_SYNTAXES, whether or not the rule matches.
  */
 export function selectTargetSyntax(
   metadata,
   { incomingTransferSyntax, rules = DEFAULT_RULES } = {}
 ) {
+  checkRules(rules);
   const sopClassUID = first(metadata, "00080016");
   const given =
     incomingTransferSyntax ??
     first(metadata, "00083002") ??
     first(metadata, "00020010");
-  const incoming =
-    given ?? (sopClassUID === WSI ? JPEG_BASELINE : EXPLICIT_LITTLE_ENDIAN);
+  const incoming = given ?? EXPLICIT_LITTLE_ENDIAN;
   const assumed = given ? "" : ` (assumed input ${incoming})`;
   const facts = {
     sopClassUID,

@@ -12,7 +12,6 @@ import {
   HTJ2K_LOSSLESS,
   JPEG_BASELINE,
   JPEG_LS_LOSSLESS,
-  JPEG_XL,
   JPEG_XL_JPEG_RECOMPRESSION,
   JPEG_XL_LOSSLESS,
   RLE_LOSSLESS,
@@ -102,18 +101,16 @@ describe("API contract: selectTargetSyntax default rule", () => {
     expect(select(seg, EXPLICIT_LITTLE_ENDIAN)).toBe(DEFLATED_IMAGE_FRAME);
   });
 
-  test("4. colour: .111 for JPEG, .110 for lossless, .112 for other lossy", () => {
+  test("4. colour: .111 for JPEG, .110 for uncompressed (also 16-bit), other compressed input kept", () => {
     const rgb = metadata({ spp: 3, bits: 8 });
     expect(select(rgb, JPEG_BASELINE)).toBe(JPEG_XL_JPEG_RECOMPRESSION);
     expect(select(rgb, EXPLICIT_LITTLE_ENDIAN)).toBe(JPEG_XL_LOSSLESS);
-    expect(select(rgb, RLE_LOSSLESS)).toBe(JPEG_XL_LOSSLESS);
-    expect(select(rgb, "1.2.840.10008.1.2.4.51")).toBe(JPEG_XL);
-    expect(
-      select(
-        metadata({ spp: 3, bits: 8, lossy: true }),
-        "1.2.840.10008.1.2.4.91"
-      )
-    ).toBe(JPEG_XL);
+    expect(select(metadata({ spp: 3, bits: 16 }), EXPLICIT_LITTLE_ENDIAN)).toBe(
+      JPEG_XL_LOSSLESS
+    );
+    expect(select(rgb, RLE_LOSSLESS)).toBe(null);
+    expect(select(rgb, "1.2.840.10008.1.2.4.51")).toBe(null);
+    expect(select(rgb, "1.2.840.10008.1.2.4.91")).toBe(null);
   });
 
   test("5. grayscale, already compressed: keep", () => {
@@ -126,17 +123,24 @@ describe("API contract: selectTargetSyntax default rule", () => {
     expect(select(metadata(), "1.2.840.10008.1.2")).toBe(JPEG_LS_LOSSLESS);
   });
 
-  test("no incoming syntax: Explicit VR LE for images, JPEG Baseline for WSI", () => {
+  test("no incoming syntax: native little endian, also for WSI", () => {
     const image = selectTargetSyntax(metadata());
     expect(image.target).toBe(JPEG_LS_LOSSLESS);
     expect(image.reason).toMatch(/assumed input 1\.2\.840\.10008\.1\.2\.1/);
     expect(select(metadata({ sop: WSI, spp: 3, bits: 8 }))).toBe(
-      JPEG_XL_JPEG_RECOMPRESSION
+      JPEG_XL_LOSSLESS
     );
   });
 
-  test("existing limits keep the frame: 1-bit, YBR_FULL", () => {
+  test("limits keep the frame: 1-bit, 32-bit, YBR_FULL", () => {
     expect(select(metadata({ bits: 1 }), EXPLICIT_LITTLE_ENDIAN)).toBe(null);
+    const dose = selectTargetSyntax(metadata({ bits: 32 }), {
+      incomingTransferSyntax: EXPLICIT_LITTLE_ENDIAN,
+    });
+    expect(dose).toEqual({
+      target: null,
+      reason: expect.stringMatching(/at most 16-bit grayscale.*deflate/),
+    });
     const ybr = metadata({ spp: 3, bits: 8, photometric: "YBR_FULL" });
     const result = selectTargetSyntax(ybr, {
       incomingTransferSyntax: EXPLICIT_LITTLE_ENDIAN,
@@ -158,6 +162,39 @@ describe("API contract: selectTargetSyntax default rule", () => {
       }).target
     ).toBe(HTJ2K_LOSSLESS);
   });
+
+  test("a table with an unknown 'when' key or target fails, even when no rule matches", () => {
+    const meta = metadata();
+    const opts = (rules) => ({ incomingTransferSyntax: RLE_LOSSLESS, rules });
+    expect(() =>
+      selectTargetSyntax(meta, opts([{ when: { color: true }, target: null }]))
+    ).toThrow(/unknown 'when' key 'color'/);
+    expect(() =>
+      selectTargetSyntax(
+        meta,
+        opts([{ when: { compressed: false }, target: "nope" }])
+      )
+    ).toThrow(/rule 0: unknown output transfer syntax 'nope'/);
+  });
+});
+
+test("API contract: HTJ2K refuses colour over 8 bits, which the codec does not keep exactly", async () => {
+  const imageInfo = {
+    ...frame(16, false).imageInfo,
+    samplesPerPixel: 3,
+    photometric: "RGB",
+  };
+  const pixels = new Uint8Array(13 * 17 * 3 * 2);
+  await expect(encodeFrame(pixels, imageInfo, HTJ2K_LOSSLESS)).rejects.toThrow(
+    /at most 8-bit colour/
+  );
+  const rules = [{ when: {}, target: "htj2k", reason: "all" }];
+  expect(
+    selectTargetSyntax(metadata({ spp: 3, bits: 16 }), {
+      incomingTransferSyntax: EXPLICIT_LITTLE_ENDIAN,
+      rules,
+    }).target
+  ).toBe(null);
 });
 
 test("API contract: ESM import of @dcmjs/commands/pixel", () => {
