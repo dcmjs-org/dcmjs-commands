@@ -401,9 +401,10 @@ and the compression rule `selectTargetSyntax`.
 ```js
 import { selectTargetSyntax, transcodeFrame, imageInfoFromDict } from "@dcmjs/commands/pixel";
 
-const { target, reason } = selectTargetSyntax(metadata, { incomingTransferSyntax });
+// incomingTransferSyntax is optional; `incoming` is the syntax the rule used.
+const { target, reason, incoming } = selectTargetSyntax(metadata, { incomingTransferSyntax });
 const stored = target
-  ? await transcodeFrame(frame, imageInfoFromDict(metadata), incomingTransferSyntax, target)
+  ? await transcodeFrame(frame, imageInfoFromDict(metadata), incoming, target)
   : frame;
 ```
 
@@ -413,14 +414,15 @@ The default rule (`DEFAULT_RULES`, first match wins; `null` keeps the frame):
 | --- | --- | --- |
 | Video SOP class, or video transfer syntax | any | keep |
 | Whole-slide image | JPEG Baseline (`.4.50`) | JPEG XL JPEG Recompression (`.4.111`) |
-| Segmentation | any | Deflated Image Frame (`1.2.840.10008.1.2.8.1`) |
+| Segmentation | uncompressed | Deflated Image Frame (`1.2.840.10008.1.2.8.1`) |
 | Colour | JPEG Baseline | `.4.111` |
 | Colour | uncompressed | JPEG XL Lossless (`.4.110`) |
 | Any | other compressed | keep |
 | Grayscale | uncompressed | JPEG-LS Lossless (`.4.80`) |
 
 Compressed input other than JPEG Baseline (for example JPEG 2000) is
-re-encoded only by a rule that names it. Without `incomingTransferSyntax`,
+re-encoded only by a rule that names it. Explicit VR Big Endian input counts
+as compressed, so the default keeps it. Without `incomingTransferSyntax`,
 the rule uses AvailableTransferSyntaxUID or TransferSyntaxUID of the
 metadata, and else assumes native little endian, for every SOP class. A
 target that the codecs cannot write exactly for the frame keeps the frame,
@@ -437,6 +439,9 @@ Known limits of the codecs (DICOM permits more):
   the rule table says.
 - HTJ2K writes colour at 8 bits only, because the codec changes the values
   of 16-bit colour frames. 16-bit RGB goes to JPEG XL Lossless by default.
+- Explicit VR Big Endian input is not converted; the default keeps it.
+
+The specification is [docs/specs/library/pixel.md](docs/specs/library/pixel.md).
 
 ## Development
 

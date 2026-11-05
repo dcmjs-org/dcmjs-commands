@@ -13,7 +13,7 @@ import {
   JPEG_XL_JPEG_RECOMPRESSION,
   JPEG_XL_LOSSLESS,
   bitDepthLimit,
-  isNativeSyntax,
+  isLittleEndianNative,
   resolveOutputSyntax,
 } from "./transferSyntaxes.js";
 
@@ -56,7 +56,7 @@ export const DEFAULT_RULES = [
     reason: "WSI JPEG",
   },
   {
-    when: { sopClassUID: SEGMENTATION_SOP_CLASSES },
+    when: { sopClassUID: SEGMENTATION_SOP_CLASSES, compressed: false },
     target: DEFLATED_IMAGE_FRAME,
     reason: "segmentation",
   },
@@ -169,7 +169,9 @@ function limitOf(target, facts, metadata) {
  *   the metadata; without those, native little endian (the same frame bytes
  *   in Implicit and Explicit VR) is assumed, for every SOP class.
  * @param {object[]} [options.rules] a table that replaces DEFAULT_RULES.
- * @returns {{ target: string | null, reason: string }} `target: null` keeps
+ * @returns {{ target: string | null, reason: string, incoming: string }}
+ *   `incoming` is the input syntax that the rule used (given, read, or
+ *   assumed); pass it to `transcodeFrame`. `target: null` keeps
  *   the frame unchanged. A frame with Bits Allocated over 16 always gives
  *   `null`, before any rule, so no table can compress or change 32-bit
  *   data. A target that is the same as the input, or that the
@@ -199,7 +201,9 @@ export function selectTargetSyntax(
       VIDEO_SOP_CLASSES.includes(sopClassUID) ||
       Boolean(isVideoTransferSyntax(incoming)),
     colour: (first(metadata, "00280002") ?? 1) > 1,
-    compressed: !isNativeSyntax(incoming),
+    // Big endian counts as compressed, so the default keeps it: the decoders
+    // read little endian samples only.
+    compressed: !isLittleEndianNative(incoming),
     lossyInput:
       LOSSY_SYNTAXES.includes(incoming) || first(metadata, "00282110") === "01",
   };
@@ -207,11 +211,16 @@ export function selectTargetSyntax(
     return {
       target: null,
       reason: `Bits Allocated ${facts.bitsAllocated} stays unchanged`,
+      incoming,
     };
   }
   const rule = rules.find(({ when = {} }) => matches(when, facts));
   if (!rule?.target) {
-    return { target: null, reason: (rule?.reason ?? "no rule") + assumed };
+    return {
+      target: null,
+      reason: (rule?.reason ?? "no rule") + assumed,
+      incoming,
+    };
   }
   const target = resolveOutputSyntax(rule.target);
   const keep =
@@ -220,6 +229,6 @@ export function selectTargetSyntax(
       ? "already in the target syntax"
       : limitOf(target, facts, metadata);
   return keep
-    ? { target: null, reason: `${rule.reason}: ${keep}${assumed}` }
-    : { target: target.uid, reason: rule.reason + assumed };
+    ? { target: null, reason: `${rule.reason}: ${keep}${assumed}`, incoming }
+    : { target: target.uid, reason: rule.reason + assumed, incoming };
 }
