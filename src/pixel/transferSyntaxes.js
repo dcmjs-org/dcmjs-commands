@@ -71,7 +71,8 @@ export const OUTPUT_SYNTAXES = [
     encapsulated: true,
     lossy: false,
     // shortcut: the codec changes the values of 32-bit frames and of colour
-    // frames over 8 bits (DICOM permits both); raise when the codec is fixed.
+    // frames over 8 bits (DICOM permits both); raise when
+    // https://github.com/cornerstonejs/codecs/issues/98 is fixed.
     maxBits: 16,
     maxColourBits: 8,
   },
