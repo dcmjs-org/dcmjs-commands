@@ -49,7 +49,8 @@ rules:
   to JPEG XL JPEG Recompression. That conversion is lossless, and a later conversion back
   gives the same JPEG bytes.
 - **PL-U5.** A frame with Bits Allocated over 16 never changes, whatever the rule table
-  says. `selectTargetSyntax` gives `null` before it reads a rule.
+  says. A frame whose metadata has no Bits Allocated also never changes, because its depth
+  can be over 16. `selectTargetSyntax` gives `null` before it reads a rule.
 - **PL-U6.** Every target of the default rules is lossless. A custom rule can name a lossy
   target (`jpeg`, `jxl`). The program must then record the lossy step in the header
   (`updatePixelHeader` with `lossyRatio`) and give the instance a new SOP Instance UID.

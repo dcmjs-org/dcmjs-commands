@@ -172,9 +172,9 @@ function limitOf(target, facts, metadata) {
  * @returns {{ target: string | null, reason: string, incoming: string }}
  *   `incoming` is the input syntax that the rule used (given, read, or
  *   assumed); pass it to `transcodeFrame`. `target: null` keeps
- *   the frame unchanged. A frame with Bits Allocated over 16 always gives
- *   `null`, before any rule, so no table can compress or change 32-bit
- *   data. A target that is the same as the input, or that the
+ *   the frame unchanged. A frame with Bits Allocated over 16, or with no
+ *   Bits Allocated, always gives `null`, before any rule, so no table can
+ *   compress or change 32-bit data. A target that is the same as the input, or that the
  *   codecs cannot write exactly for this frame (1-bit data, a bit depth over
  *   `maxBits` of the target, YBR_FULL, lossy PALETTE COLOR), also gives
  *   `null`, and `reason` says why.
@@ -207,10 +207,14 @@ export function selectTargetSyntax(
     lossyInput:
       LOSSY_SYNTAXES.includes(incoming) || first(metadata, "00282110") === "01",
   };
-  if (facts.bitsAllocated > 16) {
+  const bits = facts.bitsAllocated;
+  if (bits == null || bits > 16) {
     return {
       target: null,
-      reason: `Bits Allocated ${facts.bitsAllocated} stays unchanged`,
+      reason:
+        bits == null
+          ? "Bits Allocated is missing; the frame stays unchanged"
+          : `Bits Allocated ${bits} stays unchanged`,
       incoming,
     };
   }

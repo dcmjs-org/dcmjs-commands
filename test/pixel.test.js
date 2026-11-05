@@ -155,6 +155,10 @@ describe("API contract: selectTargetSyntax default rule", () => {
         reason: "Bits Allocated 32 stays unchanged",
       });
     }
+    // An unknown depth can be 32-bit, so it stays unchanged too.
+    const noBits = metadata();
+    delete noBits["00280100"];
+    expect(select(noBits, EXPLICIT_LITTLE_ENDIAN)).toBe(null);
     const ybr = metadata({ spp: 3, bits: 8, photometric: "YBR_FULL" });
     const result = selectTargetSyntax(ybr, {
       incomingTransferSyntax: EXPLICIT_LITTLE_ENDIAN,
