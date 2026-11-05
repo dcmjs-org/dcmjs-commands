@@ -359,7 +359,21 @@ const isPrivateCreator = (tag) =>
 const isOverlayOrCurve = (tag) => /^(60|50)[0-9A-F]{2}/.test(tag);
 /** File meta, group lengths, pixel data and padding: never copied. */
 const isStructural = (tag) =>
-  tag.startsWith("0002") || tag.endsWith("0000") || tag >= "7FE00000";
+  tag.startsWith("0002") ||
+  tag.endsWith("0000") ||
+  tag.startsWith("7FE0") ||
+  tag === "FFFCFFFC";
+/** Private groups after the pixel data (7FE1 to 7FFF). */
+export const isTrailingPrivate = (tag) => tag > "7FE0FFFF" && tag < "8000";
+/** The window attributes that the Frame VOI LUT macro holds. */
+const WINDOW = new Set(
+  [
+    "WindowCenter",
+    "WindowWidth",
+    "WindowCenterWidthExplanation",
+    "VOILUTFunction",
+  ].map(tagOf)
+);
 
 const numbers = (dict, tag) => dict[tag]?.Value?.map(Number);
 /** The values of a string element; a value joined with "\" is split. */
@@ -769,6 +783,8 @@ function fullRangeWindow(dict) {
 }
 
 const copy = (element) => element && structuredClone(element);
+const hasWindow = (dict) =>
+  dict[T.WindowCenter]?.Value?.length && dict[T.WindowWidth]?.Value?.length;
 
 /** The items of each functional group macro of one frame, by keyword. */
 function frameMacros(dict, target) {
@@ -785,10 +801,7 @@ function frameMacros(dict, target) {
     ImageOrientationPatient: copy(dict[T.ImageOrientationPatient]),
   });
 
-  if (
-    dict[T.WindowCenter]?.Value?.length &&
-    dict[T.WindowWidth]?.Value?.length
-  ) {
+  if (hasWindow(dict)) {
     macros.FrameVOILUTSequence = item({
       WindowCenter: copy(dict[T.WindowCenter]),
       WindowWidth: copy(dict[T.WindowWidth]),
@@ -986,6 +999,8 @@ function nowDateTime(now) {
  *   study and series of a referenced image, for the evidence sequence
  * @param {Date} [args.now]
  * @param {boolean} [args.json] AT values as DICOM JSON strings
+ * @param {boolean} [args.keepTrailingPrivate] copy the private groups after
+ *   the pixel data (7FE1 to 7FFF); by default they are added to `dropped`
  * @returns {{ dict: object, dropped: string[], unlocated: string[] }}
  *   `unlocated` lists referenced images that `locate` could not place.
  */
@@ -997,6 +1012,7 @@ export function buildLegacyConverted({
   locate,
   now = new Date(),
   json = false,
+  keepTrailingPrivate = false,
 }) {
   const dicts = stack.instances.map((instance) => instance.dict);
   const { target } = stack;
@@ -1004,18 +1020,25 @@ export function buildLegacyConverted({
   const dropped = new Set();
   const sharedUnassigned = {};
   const perFrameUnassigned = dicts.map(() => ({}));
+  const windowMoved = dicts.every(hasWindow);
 
   const tags = [...new Set(dicts.flatMap((d) => Object.keys(d)))].sort();
   for (const tag of tags) {
-    if (DISCARDED.has(tag) || isOverlayOrCurve(tag)) {
+    if (
+      DISCARDED.has(tag) ||
+      isOverlayOrCurve(tag) ||
+      (isTrailingPrivate(tag) && !keepTrailingPrivate)
+    ) {
       dropped.add(tag);
       continue;
     }
     // A Private Creator goes with the elements of its block. The MR IOD has
     // no Irradiation Event Identification macro, so the UID stays unassigned.
+    // A window without both center and width stays unassigned (no macro).
     const moved =
       MOVED.has(tag) &&
-      !(tag === T.IrradiationEventUID && target.name === "MR");
+      !(tag === T.IrradiationEventUID && target.name === "MR") &&
+      !(WINDOW.has(tag) && !windowMoved);
     if (isStructural(tag) || moved || isPrivateCreator(tag)) {
       continue;
     }

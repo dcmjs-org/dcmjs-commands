@@ -239,8 +239,9 @@ test("leaves a MONOCHROME1 slice out, names it, and converts the others", async 
 });
 
 // User experience: common non-conformant source values still give the
-// Type 1 attributes: a lower-case BodyPartExamined, no ContentTime.
-test("maps a lower-case BodyPartExamined and fills a missing ContentTime", async () => {
+// Type 1 attributes (a lower-case BodyPartExamined, no ContentTime), and
+// no source value is lost without a warning.
+test("maps a lower-case BodyPartExamined, fills a missing ContentTime, and keeps a lone window value", async () => {
   const dir = path.join(tmpDir, "loose");
   const ct = writeSyntheticCt(dcmjs, dir);
   const { DicomMessage } = dcmjs.data;
@@ -251,9 +252,12 @@ test("maps a lower-case BodyPartExamined and fills a missing ContentTime", async
     );
     part10.dict["00180015"].Value = ["Chest"];
     delete part10.dict["00080033"];
+    delete part10.dict["00281051"];
+    part10.dict["7FE10010"] = { vr: "LO", Value: ["SIEMENS CSA NON-IMAGE"] };
+    part10.dict["7FE11010"] = { vr: "OB", Value: [new Uint8Array(8).buffer] };
     fs.writeFileSync(slice.path, Buffer.from(part10.write()));
   }
-  const { code, text } = await multiframe([dir], {
+  const { code, text, err } = await multiframe([dir], {
     directory: `${dir}-out`,
     json: true,
   });
@@ -265,6 +269,34 @@ test("maps a lower-case BodyPartExamined and fills a missing ContentTime", async
   );
   // No ContentTime and no AcquisitionTime: midnight, not the time of the run.
   expect(first(dict, "00080033")).toBe("000000");
+  // A WindowCenter with no WindowWidth stays in the Unassigned groups.
+  const unassigned = item(shared, "00209170");
+  expect(Number(first(unassigned, "00281050"))).toBe(40);
+  // The private groups after the pixel data are dropped with a warning,
+  // unless --keep-trailing-private is given.
+  expect(unassigned["7FE11010"]).toBeUndefined();
+  expect(err).toContain("(7FE1,1010) is a private element after the pixel");
+  const kept = await multiframe([dir], {
+    directory: `${dir}-kept`,
+    "keep-trailing-private": true,
+    json: true,
+  });
+  const keptDict = (await readFile(JSON.parse(kept.text).instances[0].path))
+    .dict;
+  expect(
+    item(item(keptDict, "52009229"), "00209170")["7FE11010"]
+  ).toBeDefined();
+});
+
+// User experience: a tree image with no frame file is named with the reason.
+test("names a tree image that has no frame file", async () => {
+  const { ct, root, seriesDir } = await makeTree("no-frame");
+  fs.rmSync(
+    path.join(seriesDir, "instances", ct.slices[2].sop, "frames", "1.mht")
+  );
+  const { code, err } = await multiframe([root], { "dry-run": true });
+  expect(code).toBe(0);
+  expect(err).toContain(`${ct.slices[2].sop}: not converted, no frame file`);
 });
 
 // User experience: the in-place tree update (the series shows the new

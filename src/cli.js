@@ -192,6 +192,7 @@ const COMMANDS = {
       "in-place": { type: "boolean", default: false },
       "new-series": { type: "boolean", default: false },
       layout: { type: "string" },
+      "keep-trailing-private": { type: "boolean", default: false },
       study: { type: "string", short: "S", multiple: true },
       series: { type: "string", multiple: true },
       "dry-run": { type: "boolean", default: false },

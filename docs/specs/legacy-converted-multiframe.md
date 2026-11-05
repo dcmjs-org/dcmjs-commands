@@ -71,12 +71,15 @@ rules:
 - **LC-U9.** The command never drops an image silently. An image that the Legacy Converted
   IODs do not allow is not converted, stays as it is, and is named on stderr with the
   reason. The reasons are: more than one frame, a PhotometricInterpretation other than
-  MONOCHROME2, no ImagePositionPatient or ImageOrientationPatient, and Explicit VR Big
-  Endian.
+  MONOCHROME2, no ImagePositionPatient or ImageOrientationPatient, Explicit VR Big
+  Endian, and (tree input) no frame file.
 - **LC-U10.** The command names on stderr each attribute that it drops: an attribute that
   the IOD does not allow (overlays, curves, the VOI LUT Sequence, the icon, digital
-  signatures), and an element of the tree metadata with no VR that no dictionary gives. It
-  also names each referenced or source image that it cannot list in the
+  signatures), an element of the tree metadata with no VR that no dictionary gives, and a
+  private element after the pixel data (groups 7FE1 to 7FFF, for example Siemens CSA
+  non-image data). `--keep-trailing-private` keeps those private elements. For Part 10
+  input, the command finds them when it writes the file, so `--dry-run` does not name them.
+  The command also names each referenced or source image that it cannot list in the
   ReferencedImageEvidenceSequence or the SourceImageEvidenceSequence.
 - **LC-U11.** `--dry-run` prints the planned instances and writes nothing. `--json` prints
   the report as JSON.
@@ -126,6 +129,8 @@ rules:
     Plane Position (Patient), Plane Orientation (Patient), Frame VOI LUT, Pixel Value
     Transformation, Referenced Image, Frame Anatomy, Irradiation Event Identification, and
     the CT, MR or PET Image Frame Type. A macro that is the same in every frame is shared.
+    The window attributes move into the Frame VOI LUT macro only when every source has
+    both WindowCenter and WindowWidth; otherwise they stay in the Unassigned groups.
   - Frame Content, Image Frame Conversion Source and Unassigned Per-Frame Converted
     Attributes are always per frame. Every frame has an Unassigned Per-Frame item, which
     can be empty.
@@ -165,6 +170,9 @@ rules:
   keeps its transfer syntax. The tree path gunzips a `.mht.gz` frame file
   (`frameToBuffer`). Each file goes to a temporary
   file and a rename puts it in place. An output path that is an input path is refused.
+  The grouping reads only the header up to PixelData (`readPart10Header`). With
+  `--keep-trailing-private`, it reads the whole file (`readPart10Frames`) to get the
+  elements after PixelData. Without the option, the write step adds them to `dropped`.
 - **LC-I8.** The tree path reads `metadata.gz` of each series, and gets the transfer syntax
   of each image from the multipart header of its first frame file. Before the grouping,
   `datasetOf` gives an element with no `vr` the `vr` of the dictionary, leaves out the
@@ -214,5 +222,9 @@ rules:
 - **Referenced images outside the input.** A classic ReferencedImageSequence or
   SourceImageSequence names no series. The command lists a referenced image in the
   evidence sequences only when the image is in the input (LC-U10).
+- **A second `--in-place --new-series` run converts again.** The source series stays
+  classic, so a second run adds one more new series with the same SeriesNumber and
+  description. A guard needs the lookup of earlier conversions, which the cleanup operation
+  also needs.
 - **MONOCHROME1.** The IODs need MONOCHROME2. The command does not invert pixel data, so it
   refuses a MONOCHROME1 image (LC-U9).

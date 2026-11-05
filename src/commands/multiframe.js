@@ -28,6 +28,7 @@ import {
   LAYOUTS,
   buildLegacyConverted,
   groupInstances,
+  isTrailingPrivate,
 } from "../enhanced/legacyConverted.js";
 import { fixValue, loadJson, saveJson } from "../utils/index.js";
 import { frameToBuffer } from "../utils/streamToBuffer.js";
@@ -58,6 +59,9 @@ Input and output:
         the converted images. The files of the converted images stay in the
         tree.
 
+A second run with --in-place --new-series converts the source series again
+and adds one more new series. Run it once for each study.
+
 Options:
   -d, --directory <dir>   write Part 10 files to <dir>
   --in-place              update the Static-DICOMweb tree
@@ -73,6 +77,10 @@ Options:
                             grouped      one instance, volume after volume
                             interleaved  one instance, by position, with
                                          the volumes in order at each position
+  --keep-trailing-private copy the private groups after the pixel data (7FE1
+                          to 7FFF, for example Siemens CSA non-image data).
+                          By default they are dropped with a warning, because
+                          they can be large and are copied for each frame.
   -S, --study <uid>       only this study (repeatable; tree root input only)
   --series <uid>          only this series (repeatable)
   --dry-run               print the planned instances; write nothing
@@ -224,7 +232,7 @@ function planStacks({ dcmjs, stacks, instanceNumberAfter, newSeries }) {
  * Builds each planned dataset. `dicts` are all the instances read, so that
  * `locate` can place a referenced image in its study and series.
  */
-function buildPlans({ dcmjs, plans, dicts, json }) {
+function buildPlans({ dcmjs, plans, dicts, json, keepTrailingPrivate }) {
   const uid = () => dcmjs.data.DicomMetaDictionary.uid();
   const where = new Map(
     dicts.map((dict) => [
@@ -240,6 +248,7 @@ function buildPlans({ dcmjs, plans, dicts, json }) {
       uid,
       locate: (sop) => where.get(sop),
       json,
+      keepTrailingPrivate,
     });
     if (plan.seriesUID !== plan.stack.seriesUID) {
       dict[SERIES] = { vr: "UI", Value: [plan.seriesUID] };
@@ -291,10 +300,15 @@ async function runPart10({ dcmjs, positionals, values, report }) {
       }
       seen.add(key);
       try {
-        const { meta, dict } = await readPart10Header({
-          dcmjs,
-          inputPath: file,
-        });
+        // The header read stops at PixelData; the groups after it need the
+        // whole file.
+        const { meta, dict } = values["keep-trailing-private"]
+          ? await readPart10Frames({
+              dcmjs,
+              inputPath: file,
+              onFrame: async () => {},
+            })
+          : await readPart10Header({ dcmjs, inputPath: file });
         // A Deflated file has the pixel layout of Explicit VR LE.
         records.push({
           id: file,
@@ -319,7 +333,13 @@ async function runPart10({ dcmjs, positionals, values, report }) {
     instanceNumberAfter: () => 0,
     newSeries: values["new-series"],
   });
-  buildPlans({ dcmjs, plans, dicts: records.map((r) => r.dict), json: false });
+  buildPlans({
+    dcmjs,
+    plans,
+    dicts: records.map((r) => r.dict),
+    json: false,
+    keepTrailingPrivate: values["keep-trailing-private"],
+  });
   report.instances = plans.map(describePlan);
   if (values["dry-run"]) {
     return;
@@ -327,6 +347,7 @@ async function runPart10({ dcmjs, positionals, values, report }) {
 
   for (const [i, plan] of plans.entries()) {
     const entry = report.instances[i];
+    const dropped = new Set(entry.dropped);
     try {
       const out = path.join(
         values.directory,
@@ -349,10 +370,16 @@ async function runPart10({ dcmjs, positionals, values, report }) {
               onFrame: (frame) => spool.append(frame),
             });
             checkFrameCount(read);
+            if (!values["keep-trailing-private"]) {
+              Object.keys(read.dict)
+                .filter(isTrailingPrivate)
+                .forEach((tag) => dropped.add(tag));
+            }
           }
         },
       });
       entry.path = out;
+      entry.dropped = dropped.size ? [...dropped].sort() : undefined;
     } catch (err) {
       entry.error = err.message;
     }
@@ -373,9 +400,6 @@ function framePath(instanceDir, n) {
 
 /** The transfer syntax that the multipart header of a frame file names. */
 function frameTransferSyntax(file) {
-  if (!file) {
-    return undefined;
-  }
   let bytes = fs.readFileSync(file);
   if (file.endsWith(".gz")) {
     bytes = zlib.gunzipSync(bytes);
@@ -459,7 +483,7 @@ function datasetOf(dcmjs, json, unknown) {
 }
 
 /** The image records of the selected series, for groupInstances. */
-function treeRecords(dcmjs, series, values) {
+function treeRecords(dcmjs, series, values, refused) {
   const records = [];
   for (const [seriesUID, { dir, metadata }] of series) {
     if (!selected(values, seriesUID)) {
@@ -471,6 +495,14 @@ function treeRecords(dcmjs, series, values) {
         continue;
       }
       const instanceDir = path.join(dir, "instances", sop);
+      const frame = framePath(instanceDir, 1);
+      if (!frame) {
+        refused.push({
+          id: sop,
+          reason: `no frame file in ${path.join(instanceDir, "frames")}`,
+        });
+        continue;
+      }
       const unknown = new Set();
       records.push({
         id: sop,
@@ -478,7 +510,7 @@ function treeRecords(dcmjs, series, values) {
         unknown,
         seriesUID,
         instanceDir,
-        transferSyntaxUID: frameTransferSyntax(framePath(instanceDir, 1)),
+        transferSyntaxUID: frameTransferSyntax(frame),
       });
     }
   }
@@ -966,7 +998,7 @@ async function runTree({ dcmjs, tree, values, report }) {
       continue;
     }
     const { stacks, refused, skipped } = groupInstances(
-      treeRecords(dcmjs, series, values),
+      treeRecords(dcmjs, series, values, report.refused),
       { layout: values.layout }
     );
     report.refused.push(...refused);
@@ -994,6 +1026,7 @@ async function runTree({ dcmjs, tree, values, report }) {
       plans,
       dicts: [...series.values()].flatMap((s) => s.metadata),
       json: Boolean(values["in-place"]),
+      keepTrailingPrivate: values["keep-trailing-private"],
     });
     for (const plan of plans) {
       plan.entry = { study: studyUID, ...describePlan(plan) };
@@ -1091,7 +1124,11 @@ export async function runMultiframe({
     for (const tag of entry.dropped ?? []) {
       stderr(
         `dcmjs multiframe: warning: ${entry.sopInstanceUID}: (${tag.slice(0, 4)},` +
-          `${tag.slice(4)}) is not allowed in a Legacy Converted image and was dropped`
+          `${tag.slice(4)}) ` +
+          (isTrailingPrivate(tag)
+            ? "is a private element after the pixel data and was dropped; " +
+              "give --keep-trailing-private to keep it"
+            : "is not allowed in a Legacy Converted image and was dropped")
       );
     }
     for (const tag of entry.unknown ?? []) {

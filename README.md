@@ -307,10 +307,13 @@ converted images. The files of the converted images stay in the tree; a
 later cleanup can remove them. With `--new-series`, the new instances go to
 a new series for each source series, with "(multi-frame)" added to the
 SeriesDescription, and the source series do not change, so a viewer shows
-the old and the new images next to each other.
+the old and the new images next to each other. A second `--in-place
+--new-series` run adds one more new series, so run it once for each study.
 
 References to the converted images in SR, SEG, KO and other instances do
-not change.
+not change. Private groups after the pixel data (7FE1 to 7FFF, for example
+Siemens CSA non-image data) are dropped with a warning;
+`--keep-trailing-private` keeps them.
 
 ```bash
 dcmjs multiframe ./study-dir -d ./enhanced          # Part 10 in, Part 10 out
