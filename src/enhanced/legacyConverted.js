@@ -510,18 +510,48 @@ function numberOrNull(dict, tag) {
 }
 
 /**
- * The first value of the private element `offset` (2 hex digits) of the
- * block of `creator` in `group`, or undefined.
+ * The private element `offset` (2 hex digits) of the block of `creator` in
+ * `group`, or undefined.
  */
-function privateValue(dict, group, creator, offset) {
+function privateElement(dict, group, creator, offset) {
   for (let block = 0x10; block <= 0xff; block++) {
     const hex = block.toString(16).toUpperCase().padStart(2, "0");
     const name = first(dict, `${group}00${hex}`);
     if (String(name ?? "").trim() === creator) {
-      return first(dict, `${group}${hex}${offset}`);
+      return dict[`${group}${hex}${offset}`];
     }
   }
   return undefined;
+}
+
+/**
+ * The first value of `element` as a number, or null. An Implicit VR file
+ * gives a private element as `UN` bytes (a tree as InlineBinary): these
+ * are read as `vr`, IS (text) or FL (float32 LE).
+ */
+function numberOf(element, vr) {
+  let value = element?.Value?.[0];
+  const bytes =
+    value instanceof ArrayBuffer
+      ? new Uint8Array(value)
+      : ArrayBuffer.isView(value)
+        ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+        : element?.InlineBinary
+          ? Buffer.from(element.InlineBinary, "base64")
+          : undefined;
+  if (bytes) {
+    value =
+      vr === "FL"
+        ? bytes.length >= 4
+          ? new DataView(bytes.buffer, bytes.byteOffset, 4).getFloat32(0, true)
+          : undefined
+        : new TextDecoder().decode(bytes).split("\\")[0];
+  }
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 /**
@@ -529,14 +559,16 @@ function privateValue(dict, group, creator, offset) {
  * Siemens, GE (which can add 1e9 to it) or Philips classic MR images.
  */
 function bValueOf(dict) {
-  const value = [
-    first(dict, T.DiffusionBValue),
-    privateValue(dict, "0019", "SIEMENS MR HEADER", "0C"),
-    privateValue(dict, "0043", "GEMS_PARM_01", "39"),
-    privateValue(dict, "2001", "Philips Imaging DD 001", "03"),
-  ].find((v) => v !== undefined && v !== "");
-  const number = Number(value ?? NaN);
-  return Number.isFinite(number) ? number % 1e9 : null;
+  const number = [
+    numberOf(dict[T.DiffusionBValue], "FD"),
+    numberOf(privateElement(dict, "0019", "SIEMENS MR HEADER", "0C"), "IS"),
+    numberOf(privateElement(dict, "0043", "GEMS_PARM_01", "39"), "IS"),
+    numberOf(
+      privateElement(dict, "2001", "Philips Imaging DD 001", "03"),
+      "FL"
+    ),
+  ].find((n) => n !== null);
+  return number === undefined ? null : number % 1e9;
 }
 
 /** Sorts null before the numbers. */
@@ -824,12 +856,13 @@ function frameMacros(dict, target) {
     macros.ReferencedImageSequence = items;
   }
 
+  const bodyPart = String(first(dict, T.BodyPartExamined) ?? "")
+    .trim()
+    .toUpperCase();
   const region =
     copy(dict[T.AnatomicRegionSequence]) ??
-    (BODY_PART_CODES[first(dict, T.BodyPartExamined)] &&
-      sq(
-        code(...withScheme(BODY_PART_CODES[first(dict, T.BodyPartExamined)]))
-      ));
+    (Object.hasOwn(BODY_PART_CODES, bodyPart) &&
+      sq(code(...withScheme(BODY_PART_CODES[bodyPart]))));
   if (region?.Value?.length) {
     macros.FrameAnatomySequence = item({
       AnatomicRegionSequence: region,
@@ -1140,10 +1173,14 @@ export function buildLegacyConverted({
     return values.size === 1 ? [...values][0] : "MIXED";
   };
   const { date, time } = nowDateTime(now);
+  // ContentTime is Type 1: a source with none gives its AcquisitionTime.
   const contents = dicts
-    .map((d) => [first(d, T.ContentDate), first(d, T.ContentTime)])
+    .map((d) => [
+      first(d, T.ContentDate),
+      first(d, T.ContentTime) || first(d, T.AcquisitionTime) || "000000",
+    ])
     .filter(([d]) => d)
-    .map(([d, t]) => [String(d), String(t ?? "")])
+    .map(([d, t]) => [String(d), String(t)])
     .sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
   const [contentDate, contentTime] = contents[0] ?? [date, time];
   // Equipment that every source lists stays; the other lists are in the
@@ -1175,7 +1212,7 @@ export function buildLegacyConverted({
       InstanceNumber: el("InstanceNumber", instanceNumber),
       NumberOfFrames: el("NumberOfFrames", dicts.length),
       ContentDate: el("ContentDate", contentDate),
-      ContentTime: el("ContentTime", contentTime || time),
+      ContentTime: el("ContentTime", contentTime),
       InstanceCreationDate: el("InstanceCreationDate", date),
       InstanceCreationTime: el("InstanceCreationTime", time),
       ImageType: el(

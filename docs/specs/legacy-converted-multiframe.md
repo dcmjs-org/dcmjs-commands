@@ -103,7 +103,9 @@ rules:
     AcquisitionNumber, so the command does not split by AcquisitionNumber otherwise.
   - The b-value (`bValueOf`) is DiffusionBValue, else the private b-value of Siemens
     (`SIEMENS MR HEADER` 0019,xx0C), GE (`GEMS_PARM_01` 0043,xx39, modulo 1e9) or Philips
-    (`Philips Imaging DD 001` 2001,xx03). The Private Creator gives the block.
+    (`Philips Imaging DD 001` 2001,xx03). The Private Creator gives the block. An
+    Implicit VR file gives the private element as `UN` bytes, and a tree as
+    InlineBinary; the command reads those bytes as IS text (Siemens, GE) or FL (Philips).
   - The b-value and the temporal position stay in the Unassigned groups. The volumes use
     StackID and InStackPositionNumber, as LC-I2 states, and not the Temporal Position
     Index or the MR Diffusion macro.
@@ -141,14 +143,15 @@ rules:
   VolumetricProperties `VOLUME`, VolumeBasedCalculationTechnique `NONE`, and for MR
   ComplexImageComponent `MAGNITUDE` and AcquisitionContrast `UNKNOWN`; PresentationLUTShape
   `IDENTITY` when the source has none; an empty AcquisitionContextSequence when the source
-  has none; the earliest ContentDate and ContentTime; and a ContributingEquipmentSequence
+  has none; the earliest ContentDate and ContentTime (a source with no ContentTime gives
+  its AcquisitionTime, else `000000`); and a ContributingEquipmentSequence
   item with the purpose DCM 109106 "Enhanced Multi-frame Conversion Equipment". FrameType
   of each frame has the ImageType values 1 to 4 of its source image.
 - **LC-I5.** The Frame VOI LUT macro is Type M for CT and PET. A source without a window
   gets a window over the full stored range, in rescaled values. The Pixel Value
   Transformation macro of CT and PET gets RescaleType `HU` (CT) or the PET Units, when the
   source has none. A classic reference without PurposeOfReferenceCodeSequence gets
-  DCM 121311 "Localizer". BodyPartExamined maps to the Anatomic Region Sequence through
+  DCM 121311 "Localizer". BodyPartExamined (trimmed, in upper case) maps to the Anatomic Region Sequence through
   PS3.16 Annex L (`src/enhanced/bodyPartCodes.js`, made from Table L-1); FrameLaterality is
   ImageLaterality, else Laterality, else `U`. ReferencedImageEvidenceSequence and
   SourceImageEvidenceSequence list the images of the ReferencedImageSequence and the

@@ -12,7 +12,7 @@ const MR = "1.2.840.10008.5.1.4.1.1.4";
 const EXPLICIT_LE = "1.2.840.10008.1.2.1";
 const SIZE = 16;
 
-function write(dcmjs, file, dataset, pixelData, privates) {
+function write(dcmjs, file, dataset, pixelData, privates, transferSyntax) {
   const { DicomMetaDictionary, DicomDict } = dcmjs.data;
   const dict = DicomMetaDictionary.denaturalizeDataset(dataset);
   Object.assign(dict, privates || {});
@@ -21,7 +21,7 @@ function write(dcmjs, file, dataset, pixelData, privates) {
     FileMetaInformationVersion: new Uint8Array([0, 1]).buffer,
     MediaStorageSOPClassUID: dataset.SOPClassUID,
     MediaStorageSOPInstanceUID: dataset.SOPInstanceUID,
-    TransferSyntaxUID: EXPLICIT_LE,
+    TransferSyntaxUID: transferSyntax,
     ImplementationClassUID: "2.25.80302813137786398554742050926734630921",
   });
   const part10 = new DicomDict(meta);
@@ -51,7 +51,8 @@ export function slicePixels(z, echo = 0) {
  * (DiffusionBValue 0, 1000, ...) or "siemens-b" (the Siemens private
  * b-value), with EchoNumbers 1. `offset` moves the slices of the second and
  * later echoes by +/- `offset` mm along z. `oddType` gives slice index 1 its
- * own ImageType value 4.
+ * own ImageType value 4. `transferSyntax` is the syntax of the files
+ * (Implicit VR LE reads the private elements back as UN).
  *
  * @returns {{ study, series, frameOfReference,
  *   slices: Array<{ path, sop, z, echo }> }} `slices` is in volume order,
@@ -67,6 +68,7 @@ export function writeSyntheticCt(
     vary = "echo",
     offset = 0,
     oddType = false,
+    transferSyntax = EXPLICIT_LE,
   } = {}
 ) {
   const { uid } = dcmjs.data.DicomMetaDictionary;
@@ -162,7 +164,8 @@ export function writeSyntheticCt(
       vary === "siemens-b" && {
         "00190010": { vr: "LO", Value: ["SIEMENS MR HEADER"] },
         "0019100C": { vr: "IS", Value: [(slice.echo - 1) * 1000] },
-      }
+      },
+      transferSyntax
     );
   }
   return { study, series, frameOfReference, slices };

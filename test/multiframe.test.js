@@ -182,30 +182,45 @@ test("orders interleaved MR echoes consistently in the split, grouped and interl
 
 // User experience: a dynamic or a diffusion series splits into one volume
 // for each temporal position or b-value, in that order.
+// The Implicit VR case reads the Siemens private b-value as UN bytes.
+const EXPLICIT = "1.2.840.10008.1.2.1";
+const IMPLICIT = "1.2.840.10008.1.2";
 test.each([
-  ["time", ["time 1", "time 2", "time 3"]],
-  ["acquisition", ["acquisition 1", "acquisition 2", "acquisition 3"]],
-  ["b", ["b 0", "b 1000", "b 2000"]],
-  ["siemens-b", ["b 0", "b 1000", "b 2000"]],
-])("splits a series by %s into volumes in order", async (vary, labels) => {
-  const dir = path.join(tmpDir, `vary-${vary}`);
-  const mr = writeSyntheticCt(dcmjs, dir, { echoes: 3, vary });
-  const { code, text } = await multiframe([dir], {
-    directory: `${dir}-out`,
-    json: true,
-  });
-  expect(code).toBe(0);
-  const { instances } = JSON.parse(text);
-  expect(instances.map((i) => i.volumes)).toEqual(labels.map((l) => [l]));
-  for (const [v, converted] of instances.entries()) {
-    const { frames } = await readFile(converted.path);
-    expect(frames).toEqual(
-      mr.slices
-        .filter((s) => s.echo === v + 1)
-        .map((s) => Buffer.from(slicePixels(s.z, s.echo).buffer))
-    );
+  ["time", ["time 1", "time 2", "time 3"], EXPLICIT],
+  [
+    "acquisition",
+    ["acquisition 1", "acquisition 2", "acquisition 3"],
+    EXPLICIT,
+  ],
+  ["b", ["b 0", "b 1000", "b 2000"], EXPLICIT],
+  ["siemens-b", ["b 0", "b 1000", "b 2000"], EXPLICIT],
+  ["siemens-b", ["b 0", "b 1000", "b 2000"], IMPLICIT],
+])(
+  "splits a series by %s into volumes in order (%s, %s)",
+  async (vary, labels, transferSyntax) => {
+    const dir = path.join(tmpDir, `vary-${vary}-${transferSyntax}`);
+    const mr = writeSyntheticCt(dcmjs, dir, {
+      echoes: 3,
+      vary,
+      transferSyntax,
+    });
+    const { code, text } = await multiframe([dir], {
+      directory: `${dir}-out`,
+      json: true,
+    });
+    expect(code).toBe(0);
+    const { instances } = JSON.parse(text);
+    expect(instances.map((i) => i.volumes)).toEqual(labels.map((l) => [l]));
+    for (const [v, converted] of instances.entries()) {
+      const { frames } = await readFile(converted.path);
+      expect(frames).toEqual(
+        mr.slices
+          .filter((s) => s.echo === v + 1)
+          .map((s) => Buffer.from(slicePixels(s.z, s.echo).buffer))
+      );
+    }
   }
-});
+);
 
 // User experience: an image that the IOD does not allow is named, not lost.
 test("leaves a MONOCHROME1 slice out, names it, and converts the others", async () => {
@@ -221,6 +236,35 @@ test("leaves a MONOCHROME1 slice out, names it, and converts the others", async 
   expect(err).toContain("MONOCHROME1");
   const [converted] = JSON.parse(text).instances;
   expect(converted.frames).toBe(3);
+});
+
+// User experience: common non-conformant source values still give the
+// Type 1 attributes: a lower-case BodyPartExamined, no ContentTime.
+test("maps a lower-case BodyPartExamined and fills a missing ContentTime", async () => {
+  const dir = path.join(tmpDir, "loose");
+  const ct = writeSyntheticCt(dcmjs, dir);
+  const { DicomMessage } = dcmjs.data;
+  for (const slice of ct.slices) {
+    const bytes = fs.readFileSync(slice.path);
+    const part10 = DicomMessage.readFile(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)
+    );
+    part10.dict["00180015"].Value = ["Chest"];
+    delete part10.dict["00080033"];
+    fs.writeFileSync(slice.path, Buffer.from(part10.write()));
+  }
+  const { code, text } = await multiframe([dir], {
+    directory: `${dir}-out`,
+    json: true,
+  });
+  expect(code).toBe(0);
+  const { dict } = await readFile(JSON.parse(text).instances[0].path);
+  const shared = item(dict, "52009229");
+  expect(first(item(item(shared, "00209071"), "00082218"), "00080100")).toBe(
+    "816094009"
+  );
+  // No ContentTime and no AcquisitionTime: midnight, not the time of the run.
+  expect(first(dict, "00080033")).toBe("000000");
 });
 
 // User experience: the in-place tree update (the series shows the new
