@@ -5,8 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import { discoverDicomFiles, pathKey } from "../io.js";
+import { discoverDicomFiles, pathKey, tempPathFor } from "../io.js";
 import { checkFrameCount, readPart10Frames } from "../pixel/frameReader.js";
 import { FrameSpool, writePart10WithFrames } from "../pixel/frameWriter.js";
 import {
@@ -155,12 +154,6 @@ function collectInputs(positionals) {
   }
   return pairs;
 }
-
-const tempPathFor = (target) =>
-  path.join(
-    path.dirname(target),
-    `.${path.basename(target)}.${crypto.randomBytes(4).toString("hex")}.tmp`
-  );
 
 /** The output syntax that keeps a file's pixel data as it is. */
 function keepSyntax(sourceUid) {

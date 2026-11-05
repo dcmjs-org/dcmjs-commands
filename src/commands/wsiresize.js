@@ -5,8 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import { discoverDicomFiles, pathKey } from "../io.js";
+import { discoverDicomFiles, pathKey, tempPathFor } from "../io.js";
 import {
   checkFrameCount,
   readPart10Frames,
@@ -865,9 +864,8 @@ async function resizeSeries({
             seriesDir,
             inPlace || group.shared ? `${sop}.dcm` : `level-${plan.level}.dcm`
           );
-    const tempPath = path.join(
-      seriesDir,
-      `.${path.basename(finalPath)}.${crypto.randomBytes(4).toString("hex")}.tmp`
+    const tempPath = tempPathFor(
+      path.join(seriesDir, path.basename(finalPath))
     );
     return {
       plan,

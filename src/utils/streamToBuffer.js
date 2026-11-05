@@ -1,16 +1,24 @@
 import { multipartDecode } from "./message.js";
+import zlib from "node:zlib";
 import { once } from "node:events";
-import { Readable } from "node:stream";
+import { Readable, pipeline } from "node:stream";
 import { commandsLog } from "./logger.js";
 
 const log = commandsLog.getLogger("streamToBuffer");
 
+/**
+ * Decodes the multipart frame of `readable` to `{ buffer, transferSyntaxUID }`.
+ * A stream with `compressed: true` (a `.mht.gz` frame file) is gunzipped.
+ */
 export async function frameToBuffer(readable) {
   if (readable.buffer) {
     return readable;
   }
 
-  const multipart = await streamToUint8Array(readable.stream);
+  const stream = readable.compressed
+    ? pipeline(readable.stream, zlib.createGunzip(), () => {})
+    : readable.stream;
+  const multipart = await streamToUint8Array(stream);
   const decoded = multipartDecode(multipart);
   const [dataview] = decoded;
   log.debug("Decoded", dataview.length, dataview.transferSyntaxUID);
