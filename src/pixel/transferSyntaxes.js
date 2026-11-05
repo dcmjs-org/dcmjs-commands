@@ -38,6 +38,7 @@ export const OUTPUT_SYNTAXES = [
     encapsulated: true,
     lossy: false,
     bytePreserving: true,
+    maxBits: 16, // PS3.5 Table 8.2.2-1
   },
   {
     uid: DEFLATED_IMAGE_FRAME,
@@ -132,7 +133,7 @@ export function bitDepthLimit(target, { bitsAllocated, samplesPerPixel = 1 }) {
     return (
       `${target.name} writes at most ${max}-bit ` +
       `${colour ? "colour" : "grayscale"} frames, got Bits Allocated ` +
-      `${bitsAllocated}; use deflate, rle or explicit-le`
+      `${bitsAllocated}; use explicit-le or deflate`
     );
   }
   return undefined;

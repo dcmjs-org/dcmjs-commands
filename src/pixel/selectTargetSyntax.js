@@ -170,7 +170,9 @@ function limitOf(target, facts, metadata) {
  *   in Implicit and Explicit VR) is assumed, for every SOP class.
  * @param {object[]} [options.rules] a table that replaces DEFAULT_RULES.
  * @returns {{ target: string | null, reason: string }} `target: null` keeps
- *   the frame unchanged. A target that is the same as the input, or that the
+ *   the frame unchanged. A frame with Bits Allocated over 16 always gives
+ *   `null`, before any rule, so no table can compress or change 32-bit
+ *   data. A target that is the same as the input, or that the
  *   codecs cannot write exactly for this frame (1-bit data, a bit depth over
  *   `maxBits` of the target, YBR_FULL, lossy PALETTE COLOR), also gives
  *   `null`, and `reason` says why.
@@ -201,6 +203,12 @@ export function selectTargetSyntax(
     lossyInput:
       LOSSY_SYNTAXES.includes(incoming) || first(metadata, "00282110") === "01",
   };
+  if (facts.bitsAllocated > 16) {
+    return {
+      target: null,
+      reason: `Bits Allocated ${facts.bitsAllocated} stays unchanged`,
+    };
+  }
   const rule = rules.find(({ when = {} }) => matches(when, facts));
   if (!rule?.target) {
     return { target: null, reason: (rule?.reason ?? "no rule") + assumed };

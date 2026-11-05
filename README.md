@@ -431,9 +431,10 @@ first call, whether or not the rule matches.
 
 Known limits of the codecs (DICOM permits more):
 
-- JPEG-LS, JPEG XL and HTJ2K write at most 16 bits per sample. A 32-bit
-  frame (RT Dose, a parametric map) stays native by default; `deflate` and
-  `rle` keep its bytes exactly.
+- JPEG-LS, JPEG XL, HTJ2K and RLE write at most 16 bits per sample (RLE by
+  PS3.5 Table 8.2.2-1). `selectTargetSyntax` never compresses or changes a
+  frame with Bits Allocated over 16 (RT Dose, a parametric map), whatever
+  the rule table says.
 - HTJ2K writes colour at 8 bits only, because the codec changes the values
   of 16-bit colour frames. 16-bit RGB goes to JPEG XL Lossless by default.
 

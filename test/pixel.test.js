@@ -134,13 +134,17 @@ describe("API contract: selectTargetSyntax default rule", () => {
 
   test("limits keep the frame: 1-bit, 32-bit, YBR_FULL", () => {
     expect(select(metadata({ bits: 1 }), EXPLICIT_LITTLE_ENDIAN)).toBe(null);
-    const dose = selectTargetSyntax(metadata({ bits: 32 }), {
-      incomingTransferSyntax: EXPLICIT_LITTLE_ENDIAN,
-    });
-    expect(dose).toEqual({
-      target: null,
-      reason: expect.stringMatching(/at most 16-bit grayscale.*deflate/),
-    });
+    // User experience: 32-bit data never changes, whatever the table says.
+    const dose = metadata({ bits: 32 });
+    const deflateAll = [{ when: {}, target: "deflate", reason: "all" }];
+    for (const rules of [undefined, deflateAll]) {
+      expect(
+        selectTargetSyntax(dose, {
+          incomingTransferSyntax: EXPLICIT_LITTLE_ENDIAN,
+          rules,
+        })
+      ).toEqual({ target: null, reason: "Bits Allocated 32 stays unchanged" });
+    }
     const ybr = metadata({ spp: 3, bits: 8, photometric: "YBR_FULL" });
     const result = selectTargetSyntax(ybr, {
       incomingTransferSyntax: EXPLICIT_LITTLE_ENDIAN,
