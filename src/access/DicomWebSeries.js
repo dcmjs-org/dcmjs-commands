@@ -9,10 +9,10 @@ export class DicomWebSeries extends SeriesAccess {
     if (this.childrenMap.size) {
       return [...this.childrenMap.values()];
     }
-    const json = await this.dicomAccess.client.retrieveSeriesMetadata({
-      studyInstanceUID: this.parent.uid,
-      seriesInstanceUID: this.uid,
-    });
+    const json = await this.dicomAccess.client.retrieveMetadata(
+      this.parent.uid,
+      this.uid
+    );
     const naturalJson = naturalize(json);
     log.info("There are", naturalJson.length, "instances in series", this.uid);
     return [

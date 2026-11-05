@@ -28,7 +28,8 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./pixel": "./src/pixel/index.js"
+    "./pixel": "./src/pixel/index.js",
+    "./dicomweb-fetch": "./src/access/DicomWebFetch.js"
   },
   "files": [
     "bin",
@@ -62,9 +63,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.1.0",
     "dcmjs": "npm:@dcmjs-org/dcmjs@1.0.0-beta.5",
-    "dicomweb-client": "^0.11.2",
     "jpeg-js": "^0.4.4",
-    "jsdom": "^29.1.1",
     "loglevel": "^1.9.2",
     "pngjs": "^7.0.0",
     "zod": "^4.4.3"
