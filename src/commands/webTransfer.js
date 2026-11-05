@@ -44,6 +44,9 @@ export function requestHeaders({ header = [], token } = {}, env = process.env) {
     headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
   }
   if (token) {
+    if (Object.keys(headers).some((n) => n.toLowerCase() === "authorization")) {
+      throw new Error("Give --token or an Authorization --header, not both");
+    }
     const value = token.startsWith("env:") ? env[token.slice(4)] : token;
     if (!value) {
       throw new Error(`--token ${token}: the environment variable is not set`);

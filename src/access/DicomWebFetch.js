@@ -46,8 +46,9 @@ export class DicomWebFetch {
   /**
    * @param {Object} options
    * @param {string} options.url - the DICOMweb root, e.g. https://host/dicomweb
-   * @param {Object|Function} [options.headers] - headers for every request,
-   *   or an (async) function that returns them, e.g. for a fresh token
+   * @param {Object|Function} [options.headers] - headers for every request
+   *   to the origin of `url` (not to other hosts), or an (async) function
+   *   that returns them, e.g. for a fresh token
    */
   constructor({ url, headers = {} }) {
     this.url = url.replace(/\/+$/, "");
@@ -56,8 +57,14 @@ export class DicomWebFetch {
 
   async request(path, accept, signal) {
     const url = new URL(path, `${this.url}/`).href;
-    const headers =
-      typeof this.headers === "function" ? await this.headers() : this.headers;
+    // Credentials go only to the DICOMweb origin, never to another host
+    // named by an absolute BulkDataURI in server metadata.
+    const sameOrigin = new URL(url).origin === new URL(this.url).origin;
+    const headers = !sameOrigin
+      ? {}
+      : typeof this.headers === "function"
+        ? await this.headers()
+        : this.headers;
     const response = await fetch(url, {
       headers: { ...headers, Accept: accept },
       signal,
@@ -173,8 +180,14 @@ export async function* responseParts(response) {
     }
     return index;
   };
+  // Discards up to and past `token`, keeping only a token-length tail while
+  // it searches, so a skipped part is neither buffered nor re-scanned.
   const skipPast = async (token) => {
-    const index = await find(token); // find() replaces buf: await first
+    let index;
+    while ((index = findToken(buf, token)) === -1) {
+      buf = buf.subarray(Math.max(0, buf.length - token.length + 1));
+      if (!(await more())) throw new Error("Truncated multipart response");
+    }
     buf = buf.subarray(index + token.length);
   };
 
@@ -200,33 +213,49 @@ export async function* responseParts(response) {
       buf = buf.subarray(headerEnd + crlf2.length);
 
       let ended = false;
-      const body = new ReadableStream({
-        async pull(controller) {
-          for (;;) {
-            const index = findToken(buf, delimiter);
-            if (index !== -1) {
-              if (index) controller.enqueue(buf.slice(0, index));
-              buf = buf.subarray(index + delimiter.length);
-              ended = true;
-              controller.close();
-              return;
+      let stale = false;
+      let bodyController;
+      // highWaterMark 0: read only on demand, so an unread body never
+      // consumes bytes that belong to the next part.
+      const body = new ReadableStream(
+        {
+          start(controller) {
+            bodyController = controller;
+          },
+          async pull(controller) {
+            for (;;) {
+              const index = findToken(buf, delimiter);
+              if (index !== -1) {
+                if (index) controller.enqueue(buf.slice(0, index));
+                buf = buf.subarray(index + delimiter.length);
+                ended = true;
+                controller.close();
+                return;
+              }
+              // Keep a tail that can hold the start of a delimiter.
+              const safe = buf.length - delimiter.length + 1;
+              if (safe > 0) {
+                controller.enqueue(buf.slice(0, safe));
+                buf = buf.subarray(safe);
+              }
+              if (!(await more())) {
+                throw new Error("Truncated multipart response");
+              }
+              if (stale) return;
+              if (safe > 0) return;
             }
-            // Keep a tail that can hold the start of a delimiter.
-            const safe = buf.length - delimiter.length + 1;
-            if (safe > 0) {
-              controller.enqueue(buf.slice(0, safe));
-              buf = buf.subarray(safe);
-            }
-            if (!(await more())) {
-              throw new Error("Truncated multipart response");
-            }
-            if (safe > 0) return;
-          }
+          },
         },
-      });
+        { highWaterMark: 0 }
+      );
       yield { headers, body };
       if (!ended) {
-        // The caller skipped (or cancelled) this body: discard the rest.
+        // The caller skipped (or cancelled) this body: fail any later read
+        // of it rather than hand back bytes of the next part, then discard.
+        stale = true;
+        bodyController.error(
+          new Error("Part body read after the next part was requested")
+        );
         await skipPast(delimiter);
       }
     }
