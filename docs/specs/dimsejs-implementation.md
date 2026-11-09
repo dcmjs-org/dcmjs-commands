@@ -31,7 +31,8 @@ implementation requirement when a better approach is available, if the user requ
   are the fallback. (DM-U5)
 - **DM-I5.** `find` converts each match to DICOM JSON through the bytes of the match:
   `fromPart10Stream` with `allowMissingHeader` reads the encoded `dcmjs-dimse` dataset, and
-  `DicomWebJsonWriter` writes the JSON, the same pair as `dcmjs dump`. Thus the JSON does not
+  `DicomWebJsonWriter` writes the JSON, the same writer as the Part 10 source of
+  `dcmjs dicomweb`. Thus the JSON does not
   depend on the naturalized form of the dcmjs version inside `dcmjs-dimse`, and an empty
   element has no `Value`. The reader detects Implicit or Explicit VR Little Endian from the
   first element, which covers the syntaxes of a C-FIND context. (DM-U2)

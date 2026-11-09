@@ -68,7 +68,7 @@ function statusText(status) {
 /**
  * Converts a dcmjs-dimse Dataset to DICOM JSON. The dataset bytes go
  * through the dcmjs 1.0 event-stream reader and DicomWebJsonWriter, the
- * same pair as `dcmjs dump` and `dcmjs dicomweb`. Thus the JSON does not
+ * same writer as the Part 10 source of `dcmjs dicomweb`. Thus the JSON does not
  * depend on the naturalized shape of the dcmjs version inside dcmjs-dimse,
  * and an empty element has no Value (PS3.18 F.2.5).
  *
