@@ -18,7 +18,7 @@ const { CStoreResponse } = dimse.responses;
 const { Status } = dimse.constants;
 
 // A DICOM UID (PS3.5 9.1), also safe as a file name
-const UID_PATTERN = /^[0-9.]{1,64}$/;
+const UID_PATTERN = /^(?=.{1,64}$)[0-9]+(\.[0-9]+)*$/;
 
 const FIND_LEVELS = {
   study: "createStudyFindRequest",
