@@ -420,6 +420,27 @@ const PIXEL_KEY = [
   "SamplesPerPixel",
 ].map(tagOf);
 
+/**
+ * Identity and equipment attributes that must have one value in a new
+ * instance: the top level has no place for a value that differs between
+ * frames. The list is the "opinionated" list of the highdicom legacy
+ * conversion, so that both tools group the same images.
+ */
+const IDENTITY_KEY = [
+  "PatientID",
+  "PatientName",
+  "Manufacturer",
+  "InstitutionName",
+  "InstitutionAddress",
+  "StationName",
+  "InstitutionalDepartmentName",
+  "ManufacturerModelName",
+  "DeviceSerialNumber",
+  "SoftwareVersions",
+  "GantryID",
+];
+const IDENTITY_TAGS = IDENTITY_KEY.map(tagOf);
+
 /** The values of the `layout` option of `groupInstances`. */
 export const LAYOUTS = ["split", "grouped", "interleaved"];
 
@@ -465,6 +486,7 @@ export function groupInstances(instances, { layout = "split" } = {}) {
       sourceClass,
       transferSyntaxUID,
       ...PIXEL_KEY.map((tag) => canon(dict[tag])),
+      ...IDENTITY_TAGS.map((tag) => canon(dict[tag])),
       orientation.map((v) => Math.round(v * 1e4)),
     ]);
     if (!groups.has(key)) {
@@ -478,6 +500,23 @@ export function groupInstances(instances, { layout = "split" } = {}) {
       });
     }
     groups.get(key).instances.push(instance);
+  }
+
+  // A series whose images differ in an identity or equipment attribute gives
+  // a group for each value; the report names the attributes.
+  const bySeries = Map.groupBy(groups.values(), (g) => g.seriesUID);
+  for (const series of bySeries.values()) {
+    const differ = IDENTITY_KEY.filter(
+      (_, i) =>
+        new Set(series.map((g) => canon(g.instances[0].dict[IDENTITY_TAGS[i]])))
+          .size > 1
+    );
+    if (differ.length) {
+      const warning =
+        `the images of the series differ in ${differ.join(", ")}, ` +
+        "so each value gives its own instance";
+      series.forEach((g) => (g.warnings = [warning]));
+    }
   }
 
   const stacks = [];
@@ -511,6 +550,7 @@ export function groupInstances(instances, { layout = "split" } = {}) {
           at: f.index + 1,
         })),
         isStack: part.every((v) => v.isStack),
+        warnings: group.warnings ?? [],
       });
     }
   }
@@ -783,6 +823,56 @@ function fullRangeWindow(dict) {
 }
 
 const copy = (element) => element && structuredClone(element);
+
+/** Flags of the Enhanced CT/MR/PET Image Modules: [keyword, yes, no]. */
+const FLAGS = [
+  ["BurnedInAnnotation", "YES", "NO"],
+  ["RecognizableVisualFeatures", "YES", "NO"],
+  ["LossyImageCompression", "01", "00"],
+];
+
+/**
+ * LossyImageCompressionMethod and Ratio when the lossy frames do not share
+ * them: each method once, with the mean ratio of the frames of that method
+ * (as highdicom does). The frames are parallel, not successive steps
+ * (C.7.6.1.1.5), so a method is not repeated for each frame.
+ */
+function lossyDetails(dicts, dict) {
+  const methodTag = tagOf("LossyImageCompressionMethod");
+  const ratioTag = tagOf("LossyImageCompressionRatio");
+  if (dict[methodTag]) {
+    return {};
+  }
+  const ratios = new Map();
+  for (const d of dicts) {
+    if (
+      String(first(d, tagOf("LossyImageCompression")) ?? "").trim() !== "01"
+    ) {
+      continue;
+    }
+    const method = strings(d, methodTag)[0]?.trim();
+    if (method) {
+      const ratio = Number(first(d, ratioTag));
+      ratios.set(method, [...(ratios.get(method) ?? []), ratio]);
+    }
+  }
+  if (!ratios.size) {
+    return {};
+  }
+  const means = [...ratios.values()].map(
+    (values) => values.reduce((a, b) => a + b, 0) / values.length
+  );
+  return {
+    [methodTag]: el("LossyImageCompressionMethod", ...ratios.keys()),
+    ...(!dict[ratioTag] &&
+      means.every(Number.isFinite) && {
+        [ratioTag]: el(
+          "LossyImageCompressionRatio",
+          ...means.map((m) => Number(m.toPrecision(6)))
+        ),
+      }),
+  };
+}
 const hasWindow = (dict) =>
   dict[T.WindowCenter]?.Value?.length && dict[T.WindowWidth]?.Value?.length;
 
@@ -877,14 +967,20 @@ function frameMacros(dict, target) {
     (Object.hasOwn(BODY_PART_CODES, bodyPart) &&
       sq(code(...withScheme(BODY_PART_CODES[bodyPart]))));
   if (region?.Value?.length) {
+    // `U` (unpaired) only for a structure that Table L-5 gives as unpaired;
+    // a paired or unknown structure with no laterality stays empty.
+    const laterality =
+      [first(dict, T.ImageLaterality), first(dict, T.Laterality)].find(
+        (value) => ["R", "L", "B", "U"].includes(value)
+      ) ??
+      (PAIRED.get(first(region.Value[0], tagOf("CodeValue"))) === false
+        ? "U"
+        : undefined);
     macros.FrameAnatomySequence = item({
       AnatomicRegionSequence: region,
-      FrameLaterality: el(
-        "FrameLaterality",
-        [first(dict, T.ImageLaterality), first(dict, T.Laterality)].find(
-          (value) => ["R", "L", "B", "U"].includes(value)
-        ) ?? "U"
-      ),
+      FrameLaterality: laterality
+        ? el("FrameLaterality", laterality)
+        : el("FrameLaterality"),
     });
   }
 
@@ -902,6 +998,11 @@ function frameMacros(dict, target) {
 }
 
 const withScheme = ([value, meaning]) => [value, "SCT", meaning];
+
+/** SCT code value -> paired (PS3.16 Table L-5). */
+const PAIRED = new Map(
+  Object.values(BODY_PART_CODES).map(([value, , paired]) => [value, paired])
+);
 
 /**
  * The evidence sequence of the images that the frames refer to through
@@ -1054,8 +1155,42 @@ export function buildLegacyConverted({
     }
   }
 
+  // A flag that differs between frames still gives the top level a value:
+  // YES (or 01) when any frame has it, NO (00) when every frame has NO.
+  for (const [keyword, yes, no] of FLAGS) {
+    const tag = tagOf(keyword);
+    if (dict[tag]) {
+      continue;
+    }
+    const values = dicts.map((d) => String(first(d, tag) ?? "").trim());
+    const value = values.includes(yes)
+      ? yes
+      : values.every((v) => v === no)
+        ? no
+        : undefined;
+    if (value) {
+      dict[tag] = el(keyword, value);
+    }
+  }
+  if (first(dict, tagOf("LossyImageCompression")) === "01") {
+    Object.assign(dict, lossyDetails(dicts, dict));
+  }
+
   // Functional groups.
   const perFrameMacros = dicts.map((d) => frameMacros(d, target));
+  const warnings = [...(stack.warnings ?? [])];
+  if (
+    perFrameMacros.some(
+      (m) =>
+        m.FrameAnatomySequence?.[0][tagOf("FrameLaterality")]?.Value.length ===
+        0
+    )
+  ) {
+    warnings.push(
+      "the anatomic region is a paired structure, and no source image gives " +
+        "its laterality, so FrameLaterality is empty"
+    );
+  }
   const keywords = [...new Set(perFrameMacros.flatMap((m) => Object.keys(m)))];
   const shared = {};
   const perFrame = dicts.map(() => ({}));
@@ -1274,5 +1409,6 @@ export function buildLegacyConverted({
     dict: sorted,
     dropped: [...dropped].sort(),
     unlocated: [...unlocated],
+    warnings,
   };
 }

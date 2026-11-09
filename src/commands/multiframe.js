@@ -241,7 +241,7 @@ function buildPlans({ dcmjs, plans, dicts, json, keepTrailingPrivate }) {
     ])
   );
   for (const plan of plans) {
-    const { dict, dropped, unlocated } = buildLegacyConverted({
+    const { dict, dropped, unlocated, warnings } = buildLegacyConverted({
       stack: plan.stack,
       sopInstanceUID: plan.sop,
       instanceNumber: plan.instanceNumber,
@@ -260,6 +260,7 @@ function buildPlans({ dcmjs, plans, dicts, json, keepTrailingPrivate }) {
     plan.dict = dict;
     plan.dropped = dropped;
     plan.unlocated = unlocated;
+    plan.warnings = warnings;
   }
 }
 
@@ -282,6 +283,7 @@ const describePlan = (plan) => ({
     ? [...new Set(plan.stack.instances.flatMap((i) => [...(i.unknown ?? [])]))]
     : undefined,
   unlocated: plan.unlocated?.length ? plan.unlocated : undefined,
+  warnings: plan.warnings?.length ? plan.warnings : undefined,
 });
 
 const selected = (values, seriesUID) =>
@@ -1136,6 +1138,9 @@ export async function runMultiframe({
         `dcmjs multiframe: warning: ${entry.sopInstanceUID}: (${tag.slice(0, 4)},` +
           `${tag.slice(4)}) has no VR in the tree metadata and was dropped`
       );
+    }
+    for (const warning of entry.warnings ?? []) {
+      stderr(`dcmjs multiframe: warning: ${entry.sopInstanceUID}: ${warning}`);
     }
     for (const sop of entry.unlocated ?? []) {
       stderr(

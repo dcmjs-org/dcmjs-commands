@@ -32,9 +32,12 @@ rules:
   `--in-place`, the command updates the tree (LC-U6). `-S <uid>` (tree root only) and
   `--series <uid>` limit the work to the given studies and series.
 - **LC-U3.** The images of one series, one SOP class, one frame of reference, one
-  orientation, one pixel layout and one transfer syntax make one group. A series with more
-  than one group, for example a localizer and an axial series, gives more than one new
-  instance. A group of one image is not converted, and is named on stderr.
+  orientation, one pixel layout, one transfer syntax, and one value of each patient
+  identity and equipment attribute make one group. A series with more than one group, for
+  example a localizer and an axial series, gives more than one new instance. When the
+  images of a series differ in a patient identity or equipment attribute, for example two
+  values of SoftwareVersions, the command names the attributes on stderr. A group of one
+  image is not converted, and is named on stderr.
 - **LC-U4.** A group with more than one image at a position has one volume for each
   temporal position, b-value, EchoNumbers value and ImageType from value 4 on. Examples
   are the phases of a dynamic series, the b-values of a diffusion series, echo 1 and
@@ -80,18 +83,29 @@ rules:
   non-image data). `--keep-trailing-private` keeps those private elements. For Part 10
   input, the command finds them when it writes the file, so `--dry-run` does not name them.
   The command also names each referenced or source image that it cannot list in the
-  ReferencedImageEvidenceSequence or the SourceImageEvidenceSequence.
+  ReferencedImageEvidenceSequence or the SourceImageEvidenceSequence, and each new instance
+  whose FrameLaterality is empty because no source image gives the laterality of a paired
+  structure.
 - **LC-U11.** `--dry-run` prints the planned instances and writes nothing. `--json` prints
   the report as JSON.
 - **LC-U12.** The output of the command has no error from `dciodvfy` (dicom3tools) that the
   source images do not also have, except the cases that LC-U10 names.
+- **LC-U13.** The new instance does not hide or invent a safety fact of its source images:
+  - when any source image is lossy compressed, the new instance is lossy compressed. The
+    same rule applies to burned-in annotation and recognizable visual features;
+  - FrameLaterality is `U` (unpaired) only for a structure that is not paired. A paired
+    structure with no laterality in the source images gets an empty FrameLaterality
+    (LC-U10).
 
 ## § Implementation requirements
 
 - **LC-I1.** `groupInstances` (`src/enhanced/legacyConverted.js`) groups the instances by
   SeriesInstanceUID, SOPClassUID, transfer syntax, SpecificCharacterSet,
-  FrameOfReferenceUID, the Image Pixel attributes, and the ImageOrientationPatient rounded
-  to 1e-4. `volumesOf` splits a group by the temporal position, the b-value, EchoNumbers
+  FrameOfReferenceUID, the Image Pixel attributes, the ImageOrientationPatient rounded
+  to 1e-4, and the `IDENTITY_KEY` attributes (PatientID, PatientName, Manufacturer,
+  InstitutionName, InstitutionAddress, StationName, InstitutionalDepartmentName,
+  ManufacturerModelName, DeviceSerialNumber, SoftwareVersions, GantryID: the list of the
+  highdicom legacy conversion). `volumesOf` splits a group by the temporal position, the b-value, EchoNumbers
   and ImageType from value 4 on. A value of a string element that is joined with `\` (as
   some DICOM JSON writes it) is split first. The frames of a volume are sorted by their
   position along the slice normal, then by AcquisitionNumber, InstanceNumber and
@@ -139,6 +153,12 @@ rules:
     Converted Attributes Sequence otherwise. An attribute that differs goes to the
     Unassigned Per-Frame item of each frame that has it. An absent attribute equals an empty
     one. A private element goes with its Private Creator.
+  - BurnedInAnnotation and RecognizableVisualFeatures that differ get `YES` at the top
+    level when any source has `YES`, and `NO` when every source has `NO`.
+    LossyImageCompression that differs gets `01` when any source has `01`, and `00` when
+    every source has `00`. With `01`, LossyImageCompressionMethod lists each method of the
+    lossy sources once, and LossyImageCompressionRatio gives the mean ratio of each method.
+    The source values also stay in the Unassigned Per-Frame items.
   - An attribute whose value the conversion sets again (InstanceNumber, ImageType,
     ContentDate, ContentTime, InstanceCreationDate, InstanceCreationTime,
     ContributingEquipmentSequence) keeps its source values in the Unassigned groups.
@@ -156,9 +176,11 @@ rules:
   gets a window over the full stored range, in rescaled values. The Pixel Value
   Transformation macro of CT and PET gets RescaleType `HU` (CT) or the PET Units, when the
   source has none. A classic reference without PurposeOfReferenceCodeSequence gets
-  DCM 121311 "Localizer". BodyPartExamined (trimmed, in upper case) maps to the Anatomic Region Sequence through
-  PS3.16 Annex L (`src/enhanced/bodyPartCodes.js`, made from Table L-1); FrameLaterality is
-  ImageLaterality, else Laterality, else `U`. ReferencedImageEvidenceSequence and
+  DCM 121311 "Localizer". BodyPartExamined (trimmed, in upper case) maps to the Anatomic
+  Region Sequence through PS3.16 Annex L (`src/enhanced/bodyPartCodes.js`, made from
+  Table L-1 and Table L-5 by `scripts/build_body_part_codes.py`). FrameLaterality is
+  ImageLaterality, else Laterality, else `U` when Table L-5 gives the code as not paired,
+  else empty. ReferencedImageEvidenceSequence and
   SourceImageEvidenceSequence list the images of the ReferencedImageSequence and the
   SourceImageSequence of the sources that are in the input.
 - **LC-I6.** With `--new-series`, the command makes one SeriesInstanceUID for each source

@@ -288,6 +288,49 @@ test("maps a lower-case BodyPartExamined, fills a missing ContentTime, and keeps
   ).toBeDefined();
 });
 
+// User experience: the new instance does not hide or invent a safety fact.
+// A lossy frame makes the instance lossy, a paired body part with no
+// laterality is not called unpaired, and a second Manufacturer in the series
+// gives its own instance, not an instance with no Manufacturer.
+test("keeps the lossy flag, the pairedness and the equipment of the source images", async () => {
+  const dir = path.join(tmpDir, "safety");
+  const ct = writeSyntheticCt(dcmjs, dir);
+  const { DicomMessage } = dcmjs.data;
+  for (const [i, slice] of ct.slices.entries()) {
+    const bytes = fs.readFileSync(slice.path);
+    const part10 = DicomMessage.readFile(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)
+    );
+    part10.dict["00180015"].Value = ["KNEE"];
+    part10.dict["00080070"].Value = [i < 2 ? "Vendor A" : "Vendor B"];
+    if (i === 1) {
+      part10.dict["00282110"] = { vr: "CS", Value: ["01"] };
+      part10.dict["00282114"] = { vr: "CS", Value: ["ISO_10918_1"] };
+      part10.dict["00282112"] = { vr: "DS", Value: [10] };
+    }
+    fs.writeFileSync(slice.path, Buffer.from(part10.write()));
+  }
+  const { code, text, err } = await multiframe([dir], {
+    directory: `${dir}-out`,
+    json: true,
+  });
+  expect(code).toBe(0);
+  const { instances } = JSON.parse(text);
+  expect(instances).toHaveLength(2);
+  expect(err).toContain("differ in Manufacturer");
+  expect(err).toContain("FrameLaterality is empty");
+
+  const dicts = await Promise.all(
+    instances.map(async (i) => (await readFile(i.path)).dict)
+  );
+  const vendorA = dicts.find((d) => first(d, "00080070") === "Vendor A");
+  expect(first(vendorA, "00282110")).toBe("01");
+  expect(first(vendorA, "00282114")).toBe("ISO_10918_1");
+  expect(Number(first(vendorA, "00282112"))).toBe(10);
+  const anatomy = item(item(vendorA, "52009229"), "00209071");
+  expect((anatomy["00209072"].Value ?? []).join("")).toBe("");
+});
+
 // User experience: a tree image with no frame file is named with the reason.
 test("names a tree image that has no frame file", async () => {
   const { ct, root, seriesDir } = await makeTree("no-frame");
