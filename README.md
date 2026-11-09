@@ -36,7 +36,7 @@ Four bins ship with the package:
 | `dcmjs`      | local Part 10 files: dump, instance, convert, anonymize, validate, filter, dicomdir, dicomweb, transcode, wsiresize — plus patient-access (SMART Imaging Access retrieval) |
 | `dcmjs-mcp`  | the same verbs as MCP tools over stdio, for LLM agents                                                                                                                     |
 | `dicomwebjs` | DICOMweb sources: dump, instance, download, part10                                                                                                                         |
-| `dimsejs`    | DIMSE networking — **experimental stub, not implemented**                                                                                                                  |
+| `dimsejs`    | DIMSE SCU: echo, find, store, get                                                                                                                                          |
 
 For a worked tour of every command with runnable examples, see
 [EXAMPLES.md](EXAMPLES.md). For where the tooling is headed (library-level
@@ -387,6 +387,25 @@ half:
 - `studies/<studyUID>/series/<seriesUID>/instances/<sopUID>/frames/<n>.mht[.gz]` — frame data
 
 Uncompressed variants are accepted, but will not be found on a search.
+
+## dimsejs commands
+
+DIMSE SCU commands on [dcmjs-dimse](https://github.com/PantelisGeorgiadis/dcmjs-dimse).
+Every command takes `<host> <port>`, `--aet` (calling AE title, default
+`DCMJS`), `--aec` (called AE title, default `ANY-SCP`) and `--timeout <ms>`.
+The exit code is 0 on success, 1 on a failure status or a network error, and
+2 on a usage error.
+
+```bash
+dimsejs echo pacs.local 104 --aec PACS
+# C-FIND: a JSON array of DICOM JSON matches; -L study|series|image|worklist
+dimsejs find pacs.local 104 --aec PACS -L study -k PatientID=12345 -k StudyDate=20240101-
+# C-STORE: files or directories; each file body is sent unchanged when the
+# SCP accepts the file's transfer syntax, and transcoded otherwise
+dimsejs store pacs.local 104 --aec PACS ./study
+# C-GET: one <SOPInstanceUID>.dcm file per retrieved instance
+dimsejs get pacs.local 104 --aec PACS -S <StudyInstanceUID> -d ./retrieved
+```
 
 ## Development
 
