@@ -22,6 +22,8 @@ const { Status, PresentationContextResult, TransferSyntax } = dimse.constants;
 const received = { bytes: [], datasets: [] };
 // The transfer syntaxes the SCP accepts, in order of preference
 let acceptSyntaxes = [];
+// The SOP classes the SCP rejects
+let rejectSopClasses = [];
 
 class TestScp extends Scp {
   associationRequested(association) {
@@ -29,7 +31,11 @@ class TestScp extends Scp {
       const context = association.getPresentationContext(id);
       const proposed = context.getTransferSyntaxUids();
       const syntax = acceptSyntaxes.find((s) => proposed.includes(s));
-      if (syntax) {
+      if (rejectSopClasses.includes(context.getAbstractSyntaxUid())) {
+        context.setResult(
+          PresentationContextResult.RejectAbstractSyntaxNotSupported
+        );
+      } else if (syntax) {
         context.setResult(PresentationContextResult.Accept, syntax);
       } else {
         context.setResult(
@@ -58,7 +64,11 @@ class TestScp extends Scp {
     callback(response);
   }
   cFindRequest(request, callback) {
-    const responses = received.datasets.map((dataset) => {
+    // With nothing stored, the identifier itself is the one match
+    const matches = received.datasets.length
+      ? received.datasets
+      : [request.getDataset()];
+    const responses = matches.map((dataset) => {
       const response = CFindResponse.fromRequest(request);
       response.setStatus(Status.Pending);
       response.setDataset(dataset);
@@ -117,6 +127,7 @@ afterAll(() => server.close());
 beforeEach(() => {
   received.bytes = [];
   received.datasets = [];
+  rejectSopClasses = [];
   acceptSyntaxes = [
     TransferSyntax.ImplicitVRLittleEndian,
     TransferSyntax.ExplicitVRLittleEndian,
@@ -175,6 +186,34 @@ test("store transcodes when the SCP accepts only another syntax", async () => {
   expect(received.datasets[0].getElement("SOPInstanceUID")).toBe(
     readPart10Header(FIXTURE).sopInstanceUid
   );
+});
+
+test("store reports a file as not stored when the SCP rejects its SOP class", async () => {
+  rejectSopClasses = [readPart10Header(FIXTURE).sopClassUid];
+  const out = capture();
+  const code = await runStore({
+    host: "127.0.0.1",
+    port,
+    inputs: [FIXTURE],
+    values,
+    ...out.io,
+  });
+  expect(code).toBe(1);
+  expect(out.stderr.join()).toContain(`${FIXTURE}: not sent`);
+  expect(out.stdout.join()).toMatch(/0 of 1 instances stored/);
+});
+
+test("find gives an empty key with no Value", async () => {
+  const out = capture();
+  const code = await runFind({
+    host: "127.0.0.1",
+    port,
+    values: { ...values, level: "study", key: ["AccessionNumber"] },
+    ...out.io,
+  });
+  expect(code).toBe(0);
+  const [match] = JSON.parse(out.stdout.join(""));
+  expect(match["00080050"]).toEqual({ vr: "SH" });
 });
 
 test("find prints the matches as DICOM JSON", async () => {

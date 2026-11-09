@@ -24,11 +24,18 @@ reason to change a user requirement. The implementation requirements are in
 - **DM-U5.** `dimsejs store` sends the data of each file without a change when the SCP
   accepts the transfer syntax of the file. When the SCP accepts only a different transfer
   syntax, the command converts the data. The SOPInstanceUID does not change in either case.
+  A conversion from a compressed transfer syntax removes the private data elements, and the
+  command then prints a warning on stderr for that file.
 - **DM-U6.** `dimsejs store` reports each file that fails, and the number of instances that
-  it stored.
+  it stored. A file that the SCP did not accept with Success is a failure. This includes a
+  file that the command did not send, because the SCP rejected its SOP class or transfer
+  syntax, or because the connection ended. The report is also given after a network error.
 - **DM-U7.** The user can retrieve a study, a series or an instance with `dimsejs get`. The
   command writes one Part 10 file for each retrieved instance, with the name
-  `<SOPInstanceUID>.dcm`, in the directory that `-d` gives.
+  `<SOPInstanceUID>.dcm`, in the directory that `-d` gives. When the SOPInstanceUID from the
+  SCP is not a valid UID, the name is `instance-<n>.dcm`. When the SCP sends no instance,
+  the command prints a warning on stderr, and the exit code follows DM-U8. The SCP sends a
+  compressed instance decompressed, without its private data elements.
 - **DM-U8.** Every command exits with 0 on success, with 1 on a failure status, a network
   error or an association rejection, and with 2 on a usage error. A message on stderr names
   the command and the cause.

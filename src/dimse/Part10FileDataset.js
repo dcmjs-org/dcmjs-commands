@@ -12,10 +12,36 @@ const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
 
 // 128-byte preamble + "DICM" + (0002,0000) UL header (8 bytes) + value (4 bytes)
 const GROUP_LENGTH_END = 144;
+// The SOP UIDs are near the start of the dataset; a larger header reads the whole file
+const HEADER_READ_BYTES = 64 * 1024;
+
+/** Reads the first `length` bytes of a file. */
+function readStart(path, length) {
+  const fd = fs.openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    return buffer.subarray(0, fs.readSync(fd, buffer, 0, length, 0));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Decodes the meta group and the dataset up to (0008,0018), or undefined. */
+function decodeHeader(bytes) {
+  try {
+    const result = DicomMessage.readFile(toArrayBuffer(bytes), {
+      untilTag: "00080019",
+    });
+    return result.dict["00080018"] ? result : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Reads the File Meta Information and the SOP UIDs of a Part 10 file. The
- * decode stops after (0008,0018) SOPInstanceUID.
+ * decode reads the first 64 KiB of the file, and reads the whole file only
+ * when (0008,0018) SOPInstanceUID is not in that part.
  * @param {string} path - Part 10 file path.
  * @returns {{meta: Object, sopClassUid: string, sopInstanceUid: string,
  *   bodyOffset: number}} The naturalized meta group, the SOP UIDs of the
@@ -23,13 +49,18 @@ const GROUP_LENGTH_END = 144;
  * @throws {Error} When the file has no DICM marker.
  */
 export function readPart10Header(path) {
-  const bytes = fs.readFileSync(path);
+  let bytes = readStart(path, HEADER_READ_BYTES);
   if (bytes.toString("latin1", 128, 132) !== "DICM") {
-    throw new Error(`${path}: not a Part 10 file (no DICM marker)`);
+    throw new Error("not a Part 10 file (no DICM marker)");
   }
-  const { meta, dict } = DicomMessage.readFile(toArrayBuffer(bytes), {
-    untilTag: "00080019",
-  });
+  let decoded = decodeHeader(bytes);
+  if (!decoded && bytes.length === HEADER_READ_BYTES) {
+    bytes = fs.readFileSync(path);
+    decoded = decodeHeader(bytes);
+  }
+  const { meta, dict } =
+    decoded ||
+    DicomMessage.readFile(toArrayBuffer(bytes), { untilTag: "00080019" });
   const naturalMeta = DicomMetaDictionary.naturalizeDataset(meta);
   return {
     meta: naturalMeta,
