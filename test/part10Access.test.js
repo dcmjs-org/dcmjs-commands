@@ -157,11 +157,10 @@ describe("download from a Part 10 directory", () => {
         expect(instance["7FE00010"].BulkDataURI).toBe(
           `instances/${sop}/frames`
         );
-        // nothing stringified to {} — every entry has vr plus content
+        // nothing stringified to {} — every entry has a vr; an empty
+        // element has no Value (DICOM JSON, PS3.18 F.2.5)
         for (const entry of Object.values(instance)) {
-          expect(
-            entry.vr && (entry.Value !== undefined || entry.BulkDataURI)
-          ).toBeTruthy();
+          expect(entry.vr).toBeTruthy();
         }
         const frame = fs.readFileSync(
           path.join(seriesDir, "instances", sop, "frames", "1.mht")
