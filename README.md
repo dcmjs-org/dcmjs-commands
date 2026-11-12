@@ -372,6 +372,30 @@ Converts DICOMweb data into binary Part 10 files.
 dicomwebjs part10 https://server/dicomweb -S <StudyInstanceUID> -d ./downloads
 ```
 
+Both commands take `--header "Name: value"` (repeatable) and
+`--token <value | env:NAME>` (sent as `Authorization: Bearer`) for a
+server that needs authentication:
+
+```bash
+dicomwebjs download https://server/dicomweb -S <uid> -d ./web --token env:DICOMWEB_TOKEN
+```
+
+### DICOMweb client (`@dcmjs/commands/dicomweb-fetch`)
+
+The http source above is a small client on the global `fetch` (no XHR, no
+jsdom). Frame, bulkdata, and Part 10 retrieves give an async iterable of
+`{ headers, body }` parts, each body a stream; errors carry `status`,
+`retryAfter`, and `url`.
+
+```js
+import { DicomWebFetch } from "@dcmjs/commands/dicomweb-fetch";
+const client = new DicomWebFetch({ url, headers: async () => ({ Authorization: `Bearer ${await token()}` }) });
+const studies = await client.search("studies", { PatientID: "123" });
+for await (const { headers, body } of await client.retrieveFrames(study, series, sop, [1, 2])) {
+  // headers.get("content-type") holds the media type and transfer-syntax
+}
+```
+
 ### Static DICOMweb file locations
 
 Tree-structured file sources follow the Static DICOMweb format, rooted at

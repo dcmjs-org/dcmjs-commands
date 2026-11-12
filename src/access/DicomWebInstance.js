@@ -1,47 +1,53 @@
 import { InstanceAccess } from "../access/DicomAccess.js";
-import { multipartDecode } from "../utils/message.js";
+import { OCTET_STREAM_ACCEPT } from "./DicomWebFetch.js";
+
+/** Reads the first part of a parts iterable into a Uint8Array. */
+async function firstPart(parts) {
+  for await (const { headers, body } of parts) {
+    const type = headers.get("content-type") || "application/octet-stream";
+    const contentType = type.split(";")[0].trim();
+    return {
+      buffer: new Uint8Array(await new Response(body).arrayBuffer()),
+      contentType,
+      // PS3.18: octet-stream without transfer-syntax is Explicit VR LE
+      transferSyntaxUID:
+        /transfer-syntax="?([^;\s"]+)/i.exec(type)?.[1] ??
+        (contentType === "application/octet-stream"
+          ? "1.2.840.10008.1.2.1"
+          : undefined),
+    };
+  }
+  throw new Error("Empty multipart response");
+}
 
 export class DicomWebInstance extends InstanceAccess {
-  /** Opens the frame.  Options allow choosing to get compressed/encapsulated data back */
+  /**
+   * Opens the frame as uncompressed data (the Part 10 writer builds its
+   * transfer syntax from the response).
+   */
   async openFrame(frame = 1, _options) {
-    const frames = await this.dicomAccess.client.retrieveInstanceFrames({
-      ..._options,
-      studyInstanceUID: this.parent.parent.uid,
-      seriesInstanceUID: this.parent.uid,
-      sopInstanceUID: this.uid,
-      frameNumbers: frame,
-    });
-    return {
-      buffer: frames[0],
-      contentType: frames[0].contentType,
-      transferSyntaxUID: frames[0].transferSyntaxUID,
-      compressed: false,
-    };
+    const { client } = this.dicomAccess;
+    const part = await firstPart(
+      await client.retrieveFrames(
+        this.parent.parent.uid,
+        this.parent.uid,
+        this.uid,
+        frame,
+        { accept: OCTET_STREAM_ACCEPT }
+      )
+    );
+    return { ...part, compressed: false };
   }
 
   async openBulkdata(key, child, _options) {
     let bulkDataURI = child.BulkDataURI;
-    // Handle static DICOMweb references, allowed but not supported by the dicomweb
-    // library.  Other relative references will have to be fixed/handled later.
+    // Static DICOMweb references are study relative.
     if (bulkDataURI.startsWith("bulkdata/")) {
       bulkDataURI = `${this.parent.parent.url}/${bulkDataURI}`;
     }
-    const bulk = await this.dicomAccess.client.retrieveBulkData({
-      studyInstanceUID: this.parent.parent.uid,
-      BulkDataURI: bulkDataURI,
-    });
-    const decoded = multipartDecode(bulk[0]);
-    if (decoded) {
-      return {
-        buffer: decoded[0],
-        encapsulated: false,
-        compressed: false,
-      };
-    }
-    return {
-      buffer: bulk[0],
-      encapsulated: false,
-      compressed: false,
-    };
+    const { buffer } = await firstPart(
+      await this.dicomAccess.client.retrieveBulkData(bulkDataURI)
+    );
+    return { buffer, encapsulated: false, compressed: false };
   }
 }
