@@ -18,6 +18,8 @@ reason to change a user requirement. The implementation requirements are in
 - **DM-U2.** The user can query an SCP at the study, series, image or worklist level with
   `dimsejs find`. The command prints the matches as a JSON array of DICOM JSON objects, the
   same form as a QIDO-RS response. The user gives each query key as `-k Keyword=value`.
+  When the SCP reports that it does not support one or more of the query keys, the command
+  keeps the matches and prints a warning on stderr.
 - **DM-U3.** `dimsejs find` refuses an unknown keyword before it connects to the SCP.
 - **DM-U4.** The user can send Part 10 files and directories of Part 10 files with
   `dimsejs store`.
@@ -27,7 +29,9 @@ reason to change a user requirement. The implementation requirements are in
   A conversion from a compressed transfer syntax removes the private data elements, and the
   command then prints a warning on stderr for that file.
 - **DM-U6.** `dimsejs store` reports each file that fails, and the number of instances that
-  it stored. A file that the SCP did not accept with Success is a failure. This includes a
+  it stored. A file that the SCP accepted with a warning status is stored: the command counts
+  it, prints the warning on stderr, and the warning alone gives exit code 0. A file that the
+  SCP did not accept with Success or a warning is a failure. This includes a
   file that the command did not send, because the SCP rejected its SOP class or transfer
   syntax, or because the connection ended. The report is also given after a network error.
 - **DM-U7.** The user can retrieve a study, a series or an instance with `dimsejs get`. The

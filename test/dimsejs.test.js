@@ -24,6 +24,8 @@ const received = { bytes: [], datasets: [] };
 let acceptSyntaxes = [];
 // The SOP classes the SCP rejects
 let rejectSopClasses = [];
+// The statuses the SCP answers with
+let statuses = {};
 
 class TestScp extends Scp {
   associationRequested(association) {
@@ -60,7 +62,7 @@ class TestScp extends Scp {
   cStoreRequest(request, callback) {
     received.datasets.push(request.getDataset());
     const response = CStoreResponse.fromRequest(request);
-    response.setStatus(Status.Success);
+    response.setStatus(statuses.store ?? Status.Success);
     callback(response);
   }
   cFindRequest(request, callback) {
@@ -70,7 +72,7 @@ class TestScp extends Scp {
       : [request.getDataset()];
     const responses = matches.map((dataset) => {
       const response = CFindResponse.fromRequest(request);
-      response.setStatus(Status.Pending);
+      response.setStatus(statuses.findPending ?? Status.Pending);
       response.setDataset(dataset);
       return response;
     });
@@ -82,10 +84,11 @@ class TestScp extends Scp {
     const store = new CStoreRequest(received.datasets[0]);
     store.on("response", () => {
       const response = CGetResponse.fromRequest(request);
-      response.setStatus(Status.Success);
+      const failures = statuses.getFailures ?? 0;
+      response.setStatus(failures ? 0xb000 : Status.Success);
       response.setRemaining(0);
       response.setCompleted(1);
-      response.setFailures(0);
+      response.setFailures(failures);
       response.setWarnings(0);
       callback(response);
     });
@@ -128,6 +131,7 @@ beforeEach(() => {
   received.bytes = [];
   received.datasets = [];
   rejectSopClasses = [];
+  statuses = {};
   acceptSyntaxes = [
     TransferSyntax.ImplicitVRLittleEndian,
     TransferSyntax.ExplicitVRLittleEndian,
@@ -203,6 +207,35 @@ test("store reports a file as not stored when the SCP rejects its SOP class", as
   expect(out.stdout.join()).toMatch(/0 of 1 instances stored/);
 });
 
+test("store counts a warning status as stored and exits 0", async () => {
+  statuses.store = 0xb000;
+  const out = capture();
+  const code = await runStore({
+    host: "127.0.0.1",
+    port,
+    inputs: [FIXTURE],
+    values,
+    ...out.io,
+  });
+  expect(code).toBe(0);
+  expect(out.stderr.join()).toMatch(/stored with warning 0xb000/);
+  expect(out.stdout.join()).toMatch(/1 of 1 instances stored/);
+});
+
+test("find keeps the matches of a 0xFF01 pending status, with a warning", async () => {
+  statuses.findPending = 0xff01;
+  const out = capture();
+  const code = await runFind({
+    host: "127.0.0.1",
+    port,
+    values: { ...values, level: "study", key: ["PatientID=P1"] },
+    ...out.io,
+  });
+  expect(code).toBe(0);
+  expect(JSON.parse(out.stdout.join(""))).toHaveLength(1);
+  expect(out.stderr.join()).toMatch(/does not support/);
+});
+
 test("find gives an empty key with no Value", async () => {
   const out = capture();
   const code = await runFind({
@@ -271,5 +304,27 @@ test("get writes each retrieved instance as a Part 10 file", async () => {
   expect(code).toBe(0);
   const file = path.join(directory, `${sopInstanceUid}.dcm`);
   expect(readPart10Header(file).sopInstanceUid).toBe(sopInstanceUid);
+  fs.rmSync(directory, { recursive: true });
+});
+
+test("get exits 1 when the final status reports failed sub-operations", async () => {
+  await runStore({
+    host: "127.0.0.1",
+    port,
+    inputs: [FIXTURE],
+    values,
+    ...capture().io,
+  });
+  statuses.getFailures = 1;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "dimsejs-get-"));
+  const out = capture();
+  const code = await runGet({
+    host: "127.0.0.1",
+    port,
+    values: { ...values, study: "1.2.3", directory },
+    ...out.io,
+  });
+  expect(code).toBe(1);
+  expect(out.stderr.join()).toMatch(/final status 0xb000, 1 failed/);
   fs.rmSync(directory, { recursive: true });
 });

@@ -17,6 +17,11 @@ const { CEchoRequest, CFindRequest, CStoreRequest, CGetRequest } =
 const { CStoreResponse } = dimse.responses;
 const { Status } = dimse.constants;
 
+// C-FIND pending with "one or more Optional Keys were not supported" (PS3.4 C.4.1.1.4)
+const PENDING_WARNING = 0xff01;
+// C-STORE warnings: the SCP stored the instance (PS3.4 B.2.3)
+const STORE_WARNINGS = [0xb000, 0xb006, 0xb007];
+
 // A DICOM UID (PS3.5 9.1), also safe as a file name
 const UID_PATTERN = /^(?=.{1,64}$)[0-9]+(\.[0-9]+)*$/;
 
@@ -140,9 +145,15 @@ export async function runFind({ host, port, values, stdout, stderr }) {
   }
   const datasets = [];
   let status;
+  let optionalKeysWarned = false;
   request.on("response", (response) => {
     status = response.getStatus();
-    if (status === Status.Pending && response.hasDataset()) {
+    if (status === PENDING_WARNING && !optionalKeysWarned) {
+      optionalKeysWarned = true;
+      stderr("find: the SCP does not support one or more of the query keys");
+    }
+    const pending = status === Status.Pending || status === PENDING_WARNING;
+    if (pending && response.hasDataset()) {
       datasets.push(response.getDataset());
     }
   });
@@ -218,6 +229,8 @@ export async function runStore({ host, port, inputs, values, stdout, stderr }) {
     // dcmjs-dimse sends no request for a rejected presentation context
     if (status === undefined) {
       failures.push(`${file}: not sent (no response from the SCP)`);
+    } else if (STORE_WARNINGS.includes(status)) {
+      stderr(`store: ${file}: stored with warning ${statusText(status)}`);
     } else if (status !== Status.Success) {
       failures.push(`${file}: status ${statusText(status)}`);
     }

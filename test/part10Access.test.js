@@ -36,7 +36,10 @@ let dir;
 const emptySourceTags = (() => {
   const buffer = fs.readFileSync(FIXTURE);
   const { dict } = DicomMessage.readFile(
-    buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+    buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    )
   );
   return Object.keys(dict).filter((tag) => !dict[tag].Value?.length);
 })();

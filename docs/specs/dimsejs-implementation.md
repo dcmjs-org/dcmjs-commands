@@ -25,7 +25,8 @@ implementation requirement when a better approach is available, if the user requ
   decompresses. An Implicit to Explicit VR conversion keeps them. (DM-U5)
 - **DM-I3a.** `store` records the status of each request. After the association closes, or
   after a network error, a request with no response is a failure. `dcmjs-dimse` sends no
-  request for a rejected presentation context, and gives no event for it. (DM-U6)
+  request for a rejected presentation context, and gives no event for it. The C-STORE
+  warning statuses 0xB000, 0xB006 and 0xB007 (PS3.4 B.2.3) count as stored. (DM-U6)
 - **DM-I4.** The affected SOP Class UID and SOP Instance UID of a C-STORE come from the
   dataset, (0008,0016) and (0008,0018), not from the File Meta Information. The meta values
   are the fallback. (DM-U5)
@@ -35,11 +36,14 @@ implementation requirement when a better approach is available, if the user requ
   `dcmjs dicomweb`. Thus the JSON does not
   depend on the naturalized form of the dcmjs version inside `dcmjs-dimse`, and an empty
   element has no `Value`. The reader detects Implicit or Explicit VR Little Endian from the
-  first element, which covers the syntaxes of a C-FIND context. (DM-U2)
+  first element, which covers the syntaxes of a C-FIND context. A match is a response with
+  the status Pending 0xFF00 or 0xFF01 (PS3.4 C.4.1.1.4); `dcmjs-dimse` 0.3.4 names only
+  0xFF00. (DM-U2)
 - **DM-I6.** `get` proposes the storage SOP classes with Implicit VR Little Endian and
   Explicit VR Little Endian, as `dcmjs-dimse` does for a C-GET. (DM-U7)
 - **DM-I7.** `get` uses the SOPInstanceUID as the file name only when it matches
-  `/^[0-9.]{1,64}$/`. The bin adapter refuses a port outside 1 to 65535 and a timeout that is
+  `UID_PATTERN` (`/^(?=.{1,64}$)[0-9]+(\.[0-9]+)*$/`): 1 to 64 characters of digit
+  components separated by single dots, so `.` and `..` are refused. The bin adapter refuses a port outside 1 to 65535 and a timeout that is
   not a positive number with exit code 2, before it connects. (DM-U7, DM-U8)
 - **DM-I8.** `readPart10Header` reads the first 64 KiB of a file for the meta group and the
   SOP UIDs. It reads the whole file only when (0008,0018) is not in that part. (DM-U4)
