@@ -32,6 +32,18 @@ const PIXEL_BYTES = 524288;
 
 let dir;
 
+// The legacy reader gives Value [] for an empty element of the fixture
+const emptySourceTags = (() => {
+  const buffer = fs.readFileSync(FIXTURE);
+  const { dict } = DicomMessage.readFile(
+    buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength
+    )
+  );
+  return Object.keys(dict).filter((tag) => !dict[tag].Value?.length);
+})();
+
 function writeInstance(filePath, { sopUid, seriesUid, instanceNumber }) {
   const buffer = fs.readFileSync(FIXTURE);
   const arrayBuffer = buffer.buffer.slice(
@@ -157,11 +169,13 @@ describe("download from a Part 10 directory", () => {
         expect(instance["7FE00010"].BulkDataURI).toBe(
           `instances/${sop}/frames`
         );
-        // nothing stringified to {} — every entry has vr plus content
-        for (const entry of Object.values(instance)) {
-          expect(
-            entry.vr && (entry.Value !== undefined || entry.BulkDataURI)
-          ).toBeTruthy();
+        // nothing stringified to {} — every entry has a vr; an entry with
+        // no content must be empty in the source (PS3.18 F.2.5)
+        for (const [tag, entry] of Object.entries(instance)) {
+          expect(entry.vr).toBeTruthy();
+          if (!entry.Value && !entry.BulkDataURI && !entry.InlineBinary) {
+            expect(emptySourceTags).toContain(tag);
+          }
         }
         const frame = fs.readFileSync(
           path.join(seriesDir, "instances", sop, "frames", "1.mht")
