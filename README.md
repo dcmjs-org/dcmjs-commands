@@ -225,7 +225,9 @@ frames (uncompressed pixel data is held whole, up to 2 GiB). Files are replaced 
 unless `-d` names an output directory. JPEG Baseline whole-slide images
 recompress losslessly to JPEG XL (`jxl-jpeg`, 1.2.840.10008.1.2.4.111),
 and `--to jpeg` gives back the same JPEG bytes. Lossy targets need
-`--lossy` and get a new SOPInstanceUID. `rle` and `deflate` are lossless,
+`--lossy` and get a new SOPInstanceUID. `jls` (JPEG-LS, 1.2.840.10008.1.2.4.80)
+and `htj2k` (HTJ2K, 1.2.840.10008.1.2.4.201) are lossless.
+`rle` and `deflate` are lossless,
 and are the targets for BINARY segmentations (Bits Allocated 1). The
 written PhotometricInterpretation always matches the written samples:
 native YBR_FULL_422 written as rle or deflate becomes YBR_FULL. The command prints instances,
@@ -411,6 +413,59 @@ half:
 - `studies/<studyUID>/series/<seriesUID>/instances/<sopUID>/frames/<n>.mht[.gz]` — frame data
 
 Uncompressed variants are accepted, but will not be found on a search.
+
+## Library: `@dcmjs/commands/pixel`
+
+The per-frame codec API for other programs: `decodeFrame`, `encodeFrame`,
+`transcodeFrame`, `isBitstreamTranscode`, `imageInfoFromDict`, `hasDecoder`,
+the header helpers `photometricAfter` and `updatePixelHeader`, the output
+syntax table (`OUTPUT_SYNTAXES`, `resolveOutputSyntax`, the UID constants),
+and the compression rule `selectTargetSyntax`.
+
+```js
+import { selectTargetSyntax, transcodeFrame, imageInfoFromDict } from "@dcmjs/commands/pixel";
+
+// incomingTransferSyntax is optional; `incoming` is the syntax the rule used.
+const { target, reason, incoming } = selectTargetSyntax(metadata, { incomingTransferSyntax });
+const stored = target
+  ? await transcodeFrame(frame, imageInfoFromDict(metadata), incoming, target)
+  : frame;
+```
+
+The default rule (`DEFAULT_RULES`, first match wins; `null` keeps the frame):
+
+| Instance | Input | Target |
+| --- | --- | --- |
+| Video SOP class, or video transfer syntax | any | keep |
+| Whole-slide image | JPEG Baseline (`.4.50`) | JPEG XL JPEG Recompression (`.4.111`) |
+| Segmentation | uncompressed | Deflated Image Frame (`1.2.840.10008.1.2.8.1`) |
+| Colour | JPEG Baseline | `.4.111` |
+| Colour | uncompressed | JPEG XL Lossless (`.4.110`) |
+| Any | other compressed | keep |
+| Grayscale | uncompressed | JPEG-LS Lossless (`.4.80`) |
+
+Compressed input other than JPEG Baseline (for example JPEG 2000) is
+re-encoded only by a rule that names it. Explicit VR Big Endian input counts
+as compressed, so the default keeps it. Without `incomingTransferSyntax`,
+the rule uses AvailableTransferSyntaxUID or TransferSyntaxUID of the
+metadata, and else assumes native little endian, for every SOP class. A
+target that the codecs cannot write exactly for the frame keeps the frame,
+and `reason` says why: 1-bit data, YBR_FULL, lossy PALETTE COLOR, and a bit
+depth over the limit of the target. Pass `rules` (a JSON table of the same
+shape) to replace the default; an unknown `when` key or target fails at the
+first call, whether or not the rule matches.
+
+Known limits of the codecs (DICOM permits more):
+
+- JPEG-LS, JPEG XL, HTJ2K and RLE write at most 16 bits per sample (RLE by
+  PS3.5 Table 8.2.2-1). `selectTargetSyntax` never compresses or changes a
+  frame with Bits Allocated over 16 (RT Dose, a parametric map), whatever
+  the rule table says.
+- HTJ2K writes colour at 8 bits only, because the codec changes the values
+  of 16-bit colour frames. 16-bit RGB goes to JPEG XL Lossless by default.
+- Explicit VR Big Endian input is not converted; the default keeps it.
+
+The specification is [docs/specs/library/pixel.md](docs/specs/library/pixel.md).
 
 ## Development
 

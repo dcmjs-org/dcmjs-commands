@@ -28,6 +28,7 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./pixel": "./src/pixel/index.js",
     "./dicomweb-fetch": "./src/access/DicomWebFetch.js"
   },
   "files": [

@@ -6,6 +6,8 @@
 
 export const EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1";
 export const JPEG_BASELINE = "1.2.840.10008.1.2.4.50";
+export const JPEG_LS_LOSSLESS = "1.2.840.10008.1.2.4.80";
+export const HTJ2K_LOSSLESS = "1.2.840.10008.1.2.4.201";
 export const JPEG_XL_LOSSLESS = "1.2.840.10008.1.2.4.110";
 export const JPEG_XL_JPEG_RECOMPRESSION = "1.2.840.10008.1.2.4.111";
 export const JPEG_XL = "1.2.840.10008.1.2.4.112";
@@ -17,8 +19,10 @@ export const DEFLATED_IMAGE_FRAME = "1.2.840.10008.1.2.8.1";
  * with `--lossless`. `method` is the (0028,2114) defined term.
  * `bytePreserving` syntaxes keep the native frame bytes exactly, so they
  * take any photometric and Bits Allocated 1 (PS3.5 CP-2301, Sup 244).
+ * `maxBits` (and `maxColourBits` for Samples per Pixel > 1) is the largest
+ * Bits Allocated that the codec writes exactly; see {@link bitDepthLimit}.
  */
-const OUTPUT_SYNTAXES = [
+export const OUTPUT_SYNTAXES = [
   {
     uid: EXPLICIT_LITTLE_ENDIAN,
     aliases: ["explicit-le", "native", "uncompressed"],
@@ -34,6 +38,7 @@ const OUTPUT_SYNTAXES = [
     encapsulated: true,
     lossy: false,
     bytePreserving: true,
+    maxBits: 16, // PS3.5 Table 8.2.2-1
   },
   {
     uid: DEFLATED_IMAGE_FRAME,
@@ -50,6 +55,27 @@ const OUTPUT_SYNTAXES = [
     encapsulated: true,
     lossy: true,
     method: "ISO_10918_1",
+    maxBits: 8,
+  },
+  {
+    uid: JPEG_LS_LOSSLESS,
+    aliases: ["jls", "jpeg-ls"],
+    name: "JPEG-LS Lossless",
+    encapsulated: true,
+    lossy: false,
+    maxBits: 16,
+  },
+  {
+    uid: HTJ2K_LOSSLESS,
+    aliases: ["htj2k", "htj2k-lossless"],
+    name: "HTJ2K Lossless",
+    encapsulated: true,
+    lossy: false,
+    // shortcut: the codec changes the values of 32-bit frames and of colour
+    // frames over 8 bits (DICOM permits both); raise when
+    // https://github.com/cornerstonejs/codecs/issues/98 is fixed.
+    maxBits: 16,
+    maxColourBits: 8,
   },
   {
     uid: JPEG_XL_LOSSLESS,
@@ -57,6 +83,7 @@ const OUTPUT_SYNTAXES = [
     name: "JPEG XL Lossless",
     encapsulated: true,
     lossy: false,
+    maxBits: 16,
   },
   {
     uid: JPEG_XL_JPEG_RECOMPRESSION,
@@ -64,6 +91,7 @@ const OUTPUT_SYNTAXES = [
     name: "JPEG XL JPEG Recompression",
     encapsulated: true,
     lossy: false,
+    maxBits: 8,
   },
   {
     uid: JPEG_XL,
@@ -72,6 +100,7 @@ const OUTPUT_SYNTAXES = [
     encapsulated: true,
     lossy: true,
     method: "ISO_18181_1",
+    maxBits: 16,
   },
 ];
 
@@ -90,6 +119,24 @@ export function resolveOutputSyntax(nameOrUid) {
     );
   }
   return found;
+}
+
+/**
+ * Why `target` cannot write frames of this depth exactly, or undefined when
+ * it can. `encodeFrame` throws with this text, and `selectTargetSyntax`
+ * keeps the frame with it.
+ */
+export function bitDepthLimit(target, { bitsAllocated, samplesPerPixel = 1 }) {
+  const colour = samplesPerPixel > 1;
+  const max = (colour && target.maxColourBits) || target.maxBits;
+  if (max && bitsAllocated > max) {
+    return (
+      `${target.name} writes at most ${max}-bit ` +
+      `${colour ? "colour" : "grayscale"} frames, got Bits Allocated ` +
+      `${bitsAllocated}; use explicit-le or deflate`
+    );
+  }
+  return undefined;
 }
 
 const DEFLATED_EXPLICIT_LITTLE_ENDIAN = "1.2.840.10008.1.2.1.99";
