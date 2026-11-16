@@ -84,9 +84,13 @@ async function referenceSanitizeLevel(dict, sopUID, bulkdataMap, frameInfo) {
     }
     json[key] = {
       vr: entry.vr,
+      // Since dcmjs 1.0.0-beta.10 the event-stream reader gives an empty
+      // element no Value, as DICOM JSON does; the legacy reader still gives []
       ...(entry.BulkDataURI
         ? { BulkDataURI: entry.BulkDataURI }
-        : { Value: structuredClone(values) }),
+        : values.length === 0
+          ? {}
+          : { Value: structuredClone(values) }),
     };
   }
   return json;

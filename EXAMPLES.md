@@ -16,7 +16,7 @@ Four binaries:
 | `dcmjs` | local Part 10 files: inspect, convert, validate, anonymize, filter, dicomdir, dicomweb — plus patient-access (SMART Imaging Access retrieval) |
 | `dcmjs-mcp` | the same verbs as MCP tools for LLM toolchains (stdio server) |
 | `dicomwebjs` | DICOMweb sources (http or Static-DICOMWeb file trees): dump, instance, study transfer |
-| `dimsejs` | DIMSE networking (stub — placeholder surface) |
+| `dimsejs` | DIMSE SCU: `echo`, `find`, `store`, `get` |
 
 Install per the [README](README.md#install) — in short: build the sibling
 `../dcmjs` checkout first (`pnpm install && pnpm run build`), then

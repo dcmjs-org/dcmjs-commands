@@ -90,6 +90,12 @@ function makeSetFilter(assignments) {
       return next(tag, info);
     },
     endElement(next) {
+      // A zero-length element has no value event; inject the replacement
+      if (currentTag !== null && !injected) {
+        const replacement = replacements.get(currentTag);
+        currentTag = null;
+        this.value(replacement);
+      }
       currentTag = null;
       return next();
     },
