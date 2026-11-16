@@ -31,6 +31,32 @@ const KINDS = {
 };
 
 /**
+ * Request headers from `--header "Name: value"` (repeatable) and
+ * `--token <value | env:NAME>` (sent as `Authorization: Bearer <token>`).
+ */
+export function requestHeaders({ header = [], token } = {}, env = process.env) {
+  const headers = {};
+  for (const line of header) {
+    const colon = line.indexOf(":");
+    if (colon < 1) {
+      throw new Error(`--header must be "Name: value", got "${line}"`);
+    }
+    headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+  }
+  if (token) {
+    if (Object.keys(headers).some((n) => n.toLowerCase() === "authorization")) {
+      throw new Error("Give --token or an Authorization --header, not both");
+    }
+    const value = token.startsWith("env:") ? env[token.slice(4)] : token;
+    if (!value) {
+      throw new Error(`--token ${token}: the environment variable is not set`);
+    }
+    headers.Authorization = `Bearer ${value}`;
+  }
+  return headers;
+}
+
+/**
  * Transfer a study from a DICOMweb (or static-file) source to the Static
  * DICOMweb file layout.
  * @param {Object} args
@@ -65,7 +91,10 @@ export async function runTransfer({
       scheme: "file",
       isDestination: true,
     });
-    const access = await createAccess(url, values);
+    const access = await createAccess(url, {
+      ...values,
+      headers: requestHeaders(values),
+    });
     const srcStudy = await access.queryStudy(studyUID);
     // Preset first, caller values override — and spread FLAT (the legacy
     // cliDownload nested the values under an `options` key by mistake).
@@ -121,6 +150,16 @@ export function registerTransferCommands(program) {
       .option("--fhir-patient <file>", "embed this FHIR Patient verbatim")
       .option("--fhir-encounter <file>", "embed this FHIR Encounter")
       .option("--wado-root <url>", "FHIR Endpoint.address for the tree")
+      .option(
+        "--header <name: value>",
+        "request header for the source (repeatable)",
+        (value, all) => [...all, value],
+        []
+      )
+      .option(
+        "--token <value | env:NAME>",
+        "bearer token for the source, or env:NAME to read it from a variable"
+      )
       .option("--debug", "debug logging")
       .option("--verbose", "per-instance transfer narration")
       .option("--quiet", "errors only")

@@ -13,7 +13,9 @@ import {
   JPEG_XL,
   JPEG_XL_JPEG_RECOMPRESSION,
   JPEG_XL_LOSSLESS,
+  OUTPUT_SYNTAXES,
   RLE_LOSSLESS,
+  bitDepthLimit,
   isLittleEndianNative,
   isNativeSyntax,
 } from "./transferSyntaxes.js";
@@ -215,6 +217,11 @@ export async function decodeFrame(frame, imageInfo, transferSyntaxUID) {
 export async function encodeFrame(pixels, imageInfo, targetUid, options = {}) {
   if (targetUid === EXPLICIT_LITTLE_ENDIAN) {
     return pixels;
+  }
+  const target = OUTPUT_SYNTAXES.find((s) => s.uid === targetUid);
+  const limit = target && bitDepthLimit(target, imageInfo);
+  if (limit) {
+    throw new Error(limit);
   }
   if (targetUid === RLE_LOSSLESS) {
     return encodeRleFrame(pixels, imageInfo);

@@ -8,10 +8,8 @@ export class DicomWebStudy extends StudyAccess {
   async read() {
     log.info("Querying dicomweb for study", this.uid);
     try {
-      const json = await this.dicomAccess.client.searchForStudies({
-        queryParams: {
-          studyInstanceUID: this.uid,
-        },
+      const json = await this.dicomAccess.client.search("studies", {
+        StudyInstanceUID: this.uid,
       });
       log.info("Read study query result", json?.length);
       if (json) {
@@ -45,9 +43,9 @@ export class DicomWebStudy extends StudyAccess {
       return [...this.childrenMap.values()];
     }
     log.info("About to query for series in study", this.uid);
-    const json = await this.dicomAccess.client.searchForSeries({
-      studyInstanceUID: this.uid,
-    });
+    const json = await this.dicomAccess.client.search(
+      `studies/${this.uid}/series`
+    );
     const naturalJson = naturalize(json);
     log.debug("Found series count=", naturalJson.length);
     return naturalJson.map((series) => this.addJson(series));

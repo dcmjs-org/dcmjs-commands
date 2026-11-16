@@ -61,7 +61,17 @@ rules:
   - The instance creation, series and content date and time get the time of the run.
   - The pixel data does not change, unless `--to` asks for a different transfer syntax.
 - **TC-U11.** The user can write RLE Lossless (`rle`, `1.2.840.10008.1.2.5`) and Deflated
-  Image Frame Compression (`deflate`, `1.2.840.10008.1.2.8.1`). Both are lossless.
+  Image Frame Compression (`deflate`, `1.2.840.10008.1.2.8.1`). Both are lossless. The user
+  can also write JPEG-LS Lossless (`jls`, `1.2.840.10008.1.2.4.80`) and HTJ2K Lossless
+  (`htj2k`, `1.2.840.10008.1.2.4.201`), for 8-bit and 16-bit grayscale, 8-bit colour, and
+  16-bit colour with `jls` only.
+- **TC-U16.** The command refuses a target that cannot hold the bit depth of the frame, with
+  an error that names the limit and the targets that can hold the frame. The file does not
+  change (TC-U7). The limits are: `rle`, `jls`, `jxl-lossless`, `jxl` and `htj2k` take at
+  most 16 bits (`rle` by PS3.5 Table 8.2.2-1), `htj2k` takes at most 8 bits for colour, and
+  `jpeg` and `jxl-jpeg` take 8 bits. `explicit-le` and `deflate` take any depth.
+  _Change:_ before this requirement, `--to rle` wrote 32-bit frames that DICOM does not
+  permit, and `--to htj2k` wrote 16-bit colour and 32-bit frames with changed values.
 - **TC-U12.** The user can convert a BINARY segmentation (Bits Allocated 1) to and from
   explicit-le, rle and deflate, and every bit stays the same (PS3.5 CP-2301, Sup 244). The
   command refuses other targets for Bits Allocated 1.
@@ -328,6 +338,13 @@ rows for each level, so the large slide above needs about 1.1 GB for the bands.
 
 ## Known limits
 
+- The HTJ2K encode of `@cornerstonejs/codec-openjph` 2.4.11 changes the values of colour
+  frames over 8 bits and of 32-bit frames
+  ([cornerstonejs/codecs#98](https://github.com/cornerstonejs/codecs/issues/98)). TC-U16
+  refuses these frames until the codec is correct. DICOM permits both (PS3.5 Table
+  8.2.14-1).
+- No lossless image codec of this package writes 32-bit frames. DICOM permits 32 bits in
+  JPEG 2000 and HTJ2K, and up to 24 bits in JPEG XL; the JPEG XL encoder here stops at 16.
 - The writer from dcmjs writes sequences with undefined length. Thus the header can be
   larger than the header of the source, with the same content.
 - `wsiresize` encodes one tile at a time on one thread. The encode of one 1024 x 1024
