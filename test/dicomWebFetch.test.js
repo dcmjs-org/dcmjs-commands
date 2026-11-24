@@ -1,7 +1,12 @@
 // test/dicomWebFetch.test.js — API contract of the fetch DICOMweb client,
 // against a local HTTP server.
 
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import dcmjs from "../src/dcmjsBundle.js";
+import { StaticDicomWebInstance } from "../src/staticdicomweb/StaticDicomWebInstance.js";
 import {
   DicomWebFetch,
   DicomWebFetchError,
@@ -172,6 +177,71 @@ test("User experience: an octet-stream frame without transfer-syntax is Explicit
   const frame = await instance.openFrame(1);
   expect(frame.transferSyntaxUID).toBe("1.2.840.10008.1.2.1");
   expect(Buffer.from(frame.buffer).toString()).toBe("PIX");
+});
+
+test("API contract: a multipart JPEG-LS frame with no boundary in the header becomes encapsulated Pixel Data in that transfer syntax", async () => {
+  const b = "BOUNDARY_synthetic";
+  // Even length, as a fragment must be; starts with the JPEG-LS SOI marker.
+  const frame = Buffer.from([0xff, 0xd8, 0xff, 0xf7, 1, 2, 3, 4, 0xff, 0xd9]);
+  routes.set(
+    "/dicomweb/studies/1/series/2/instances/6/frames/1",
+    (req, res) => {
+      // A static server: a bare multipart/related, the boundary only in the body.
+      res.writeHead(200, { "Content-Type": "multipart/related" });
+      res.end(
+        Buffer.concat([
+          Buffer.from(
+            `--${b}\r\nContent-Type: image/jls;transfer-syntax=1.2.840.10008.1.2.4.80\r\n\r\n`
+          ),
+          frame,
+          Buffer.from(`\r\n--${b}--`),
+        ])
+      );
+    }
+  );
+  const jsonData = {
+    "00080016": { vr: "UI", Value: ["1.2.840.10008.5.1.4.1.1.7"] },
+    "00080018": { vr: "UI", Value: ["2.25.6"] },
+    "00280002": { vr: "US", Value: [1] },
+    "00280010": { vr: "US", Value: [4] },
+    "00280011": { vr: "US", Value: [4] },
+    "00280100": { vr: "US", Value: [16] },
+    "7FE00010": { vr: "OW", BulkDataURI: "instances/6/frames" },
+  };
+  const source = Object.assign(Object.create(DicomWebInstance.prototype), {
+    dicomAccess: { client: new DicomWebFetch({ url: base }) },
+    parent: { uid: "2", parent: { uid: "1" } },
+    uid: "6",
+    jsonData,
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcmjs-part10-"));
+  try {
+    const destination = Object.assign(
+      Object.create(StaticDicomWebInstance.prototype),
+      { url: dir, uid: "6" }
+    );
+    await destination.storePart10(source, {});
+    const bytes = fs.readFileSync(path.join(dir, "part10.dcm"));
+    expect(bytes.includes(b)).toBe(false);
+
+    const dict = dcmjs.data.DicomMessage.readFile(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)
+    );
+    expect(dict.meta["00020010"].Value).toEqual(["1.2.840.10008.1.2.4.80"]);
+    // Encapsulated: Basic Offset Table item, one fragment, sequence delimiter.
+    const at = bytes.lastIndexOf(Buffer.from([0xe0, 0x7f, 0x10, 0x00]));
+    expect(bytes.readUInt32LE(at + 8)).toBe(0xffffffff);
+    const items = bytes.subarray(at + 12);
+    expect(items.subarray(0, 8)).toEqual(
+      Buffer.from([0xfe, 0xff, 0x00, 0xe0, 4, 0, 0, 0])
+    );
+    expect(items.readUInt32LE(12)).toBe(0xe000fffe);
+    expect(items.readUInt32LE(16)).toBe(frame.length);
+    expect(items.subarray(20, 20 + frame.length)).toEqual(frame);
+    expect(items.readUInt32LE(20 + frame.length)).toBe(0xe0ddfffe);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("API contract: credentials are not sent to a BulkDataURI on another origin", async () => {

@@ -1,6 +1,7 @@
 // src/commands/filter.js
 //
 // dcmjs filter <in.dcm> -o <out.dcm> [--set TAG=VALUE ...] [--drop TAG ...]
+//                                    [--replace TAG=VALUE ...]
 //                                    [--module <file.mjs> ...]
 //
 // Streaming file-to-file copy through an event-stream filter chain:
@@ -16,18 +17,28 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import dcmjsBundle from "../dcmjsBundle.js";
 import { createFileSink } from "../io.js";
-import { makeFhirPatientFilter } from "../filters/fhirPatient.js";
+import {
+  fhirPatientEntries,
+  makeInsertFilter,
+} from "../filters/fhirPatient.js";
 
-const { nameMap } = dcmjsBundle.data.DicomMetaDictionary;
+const { nameMap, dictionary } = dcmjsBundle.data.DicomMetaDictionary;
 
 export const filterUsage = `usage: dcmjs filter <in.dcm> -o <out.dcm> [options]
 
 Stream a DICOM file through an event-stream filter chain to a new file.
 
     -o, --output <file>   output Part 10 file (required)
-    --set TAG=VALUE       replace the value of every element with this tag
-                          (repeatable; TAG is 8 hex digits or a DICOM
-                          keyword, e.g. 00100010 or PatientName)
+    --set TAG=VALUE       insert-or-replace a top-level element: a present
+                          element gets the value, a missing one is added in
+                          ascending tag order with the VR from the data
+                          dictionary (repeatable; TAG is 8 hex digits or a
+                          DICOM keyword, e.g. 00100010 or PatientName;
+                          private tags, sequences and tags not in the
+                          dictionary are refused — use --replace)
+    --replace TAG=VALUE   replace the value of every element with this tag,
+                          at any depth; a missing tag is skipped
+                          (repeatable; same TAG forms as --set)
     --drop TAG            remove every element or sequence with this tag
                           (repeatable; same TAG forms as --set)
     --fhir-patient <file> apply a FHIR Patient resource to the patient module
@@ -35,7 +46,7 @@ Stream a DICOM file through an event-stream filter chain to a new file.
                           fields absent from the resource are written empty)
     --module <file.mjs>   load custom filter(s) from a JS module whose default
                           export is a filter object or array of filter objects
-                          (repeatable; applied before --set/--drop)
+                          (repeatable; applied before the other filters)
 
 With no filters, performs a streaming structural copy.
 `;
@@ -68,19 +79,53 @@ function normalizeTag(text) {
   return hex;
 }
 
-/** Replace the values of matching elements, first value wins. */
-function makeSetFilter(assignments) {
-  const replacements = new Map();
-  for (const assignment of assignments) {
+/** Parse TAG=VALUE assignments into [8-hex tag, value] pairs. */
+function parseAssignments(assignments, flag) {
+  return assignments.map((assignment) => {
     const eq = assignment.indexOf("=");
     if (eq < 1) {
-      throw new Error(`invalid --set "${assignment}" — expected TAG=VALUE`);
+      throw new Error(`invalid --${flag} "${assignment}" — expected TAG=VALUE`);
     }
-    replacements.set(
-      normalizeTag(assignment.slice(0, eq)),
-      assignment.slice(eq + 1)
-    );
-  }
+    return [normalizeTag(assignment.slice(0, eq)), assignment.slice(eq + 1)];
+  });
+}
+
+/**
+ * --set entries for makeInsertFilter (insert-or-replace): the VR comes
+ * from the data dictionary, and only top-level, single-VR, public,
+ * non-sequence data elements are accepted.
+ */
+function makeSetEntries(assignments) {
+  return parseAssignments(assignments, "set").map(([tag, value]) => {
+    const group = parseInt(tag.slice(0, 4), 16);
+    const entry = dictionary[`(${tag.slice(0, 4)},${tag.slice(4)})`];
+    const refuse = (why) =>
+      new Error(`--set ${tag}: ${why} — use --replace or --module instead`);
+    if (group % 2 === 1) {
+      throw refuse("a private tag has no dictionary VR");
+    }
+    if (group === 2) {
+      throw refuse("the writer generates the file meta group (0002)");
+    }
+    if (!entry) {
+      throw refuse("the tag is not in the data dictionary");
+    }
+    if (entry.vr === "SQ") {
+      throw refuse("a sequence cannot be inserted from a TAG=VALUE");
+    }
+    if (!/^[A-Z]{2}$/.test(entry.vr)) {
+      throw refuse(`the dictionary VR "${entry.vr}" is ambiguous`);
+    }
+    return { tag, vr: entry.vr, value };
+  });
+}
+
+/**
+ * --replace: replace the values of matching elements at any depth with
+ * one value. Replace-only: a tag that never occurs is skipped.
+ */
+function makeReplaceFilter(assignments) {
+  const replacements = new Map(parseAssignments(assignments, "replace"));
   let currentTag = null;
   let injected = false;
   return {
@@ -218,18 +263,21 @@ export async function runFilter({
 
   let filters;
   try {
+    // --fhir-patient and --set share one insert filter; --set wins
+    const inserts = [
+      ...(values["fhir-patient"]
+        ? fhirPatientEntries(
+            loadFhirPatientAttrs(dcmjs, values["fhir-patient"])
+          )
+        : []),
+      ...makeSetEntries(values.set ?? []),
+    ];
     filters = [
       ...(await loadModuleFilters(values.module ?? [])),
-      ...(values.set?.length ? [makeSetFilter(values.set)] : []),
+      ...(values.replace?.length ? [makeReplaceFilter(values.replace)] : []),
       ...(values.drop?.length ? [makeDropFilter(values.drop)] : []),
       // Must be last: it synthesizes elements directly to the listener base
-      ...(values["fhir-patient"]
-        ? [
-            makeFhirPatientFilter(
-              loadFhirPatientAttrs(dcmjs, values["fhir-patient"])
-            ),
-          ]
-        : []),
+      ...(inserts.length ? [makeInsertFilter(inserts)] : []),
     ];
   } catch (e) {
     stderr(`dcmjs filter: ${e.message}`);

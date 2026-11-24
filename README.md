@@ -125,6 +125,13 @@ the same command works unchanged on multi-gigabyte inputs:
 ```bash
 dcmjs filter in.dcm -o out.dcm --set 00100010=DOE^JANE --drop 00104000
 
+# --set is insert-or-replace for top-level elements: a missing tag is added
+# in tag order, with the VR from the data dictionary. (Changed: --set was
+# replace-only before.) --replace changes only the elements that are
+# present, at any depth, and skips a missing tag.
+dcmjs filter in.dcm -o out.dcm --set VOILUTFunction=SIGMOID
+dcmjs filter in.dcm -o out.dcm --replace InstitutionName=REDACTED
+
 # Apply a FHIR Patient resource to the patient identity tags.
 # Insert-or-replace: de-identified files whose patient tags were removed
 # still receive the full set; fields absent from the resource are written
@@ -368,7 +375,14 @@ dicomwebjs download ./study -S <StudyInstanceUID> -d ~/dicomweb   # Part 10 dir
 
 ### part10
 
-Converts DICOMweb data into binary Part 10 files.
+Converts DICOMweb data into binary Part 10 files. Each frame is kept in the
+transfer syntax the server sends, with no decode or transcode: the
+`transfer-syntax` parameter of the part `Content-Type`, else
+`AvailableTransferSyntaxUID` when the frame is not the uncompressed size,
+else Explicit VR Little Endian. A compressed frame becomes encapsulated
+Pixel Data. A multipart response with no boundary in its `Content-Type` (a
+static server can send a bare `multipart/related`) is split at the boundary
+on the first line of the body; `download` uses the same parser.
 
 ```bash
 dicomwebjs part10 https://server/dicomweb -S <StudyInstanceUID> -d ./downloads

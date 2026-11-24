@@ -9,12 +9,7 @@ async function firstPart(parts) {
     return {
       buffer: new Uint8Array(await new Response(body).arrayBuffer()),
       contentType,
-      // PS3.18: octet-stream without transfer-syntax is Explicit VR LE
-      transferSyntaxUID:
-        /transfer-syntax="?([^;\s"]+)/i.exec(type)?.[1] ??
-        (contentType === "application/octet-stream"
-          ? "1.2.840.10008.1.2.1"
-          : undefined),
+      transferSyntaxUID: /transfer-syntax="?([^;\s"]+)/i.exec(type)?.[1],
     };
   }
   throw new Error("Empty multipart response");
@@ -22,8 +17,11 @@ async function firstPart(parts) {
 
 export class DicomWebInstance extends InstanceAccess {
   /**
-   * Opens the frame as uncompressed data (the Part 10 writer builds its
-   * transfer syntax from the response).
+   * Opens one frame as the server sends it, with its transfer syntax: the
+   * transfer-syntax parameter of the part, else AvailableTransferSyntaxUID
+   * when the frame is not the uncompressed size, else Explicit VR Little
+   * Endian (PS3.18 octet-stream). A compressed frame stays compressed; the
+   * Part 10 writer encapsulates it.
    */
   async openFrame(frame = 1, _options) {
     const { client } = this.dicomAccess;
@@ -36,6 +34,20 @@ export class DicomWebInstance extends InstanceAccess {
         { accept: OCTET_STREAM_ACCEPT }
       )
     );
+    if (!part.transferSyntaxUID) {
+      const natural = this.jsonData || this.natural ? this.getNatural() : {};
+      const uncompressedLength = Math.ceil(
+        ((natural.Rows || 0) *
+          (natural.Columns || 0) *
+          (natural.SamplesPerPixel || 1) *
+          (natural.BitsAllocated || 8)) /
+          8
+      );
+      part.transferSyntaxUID =
+        (part.buffer.length !== uncompressedLength &&
+          [natural.AvailableTransferSyntaxUID].flat()[0]) ||
+        "1.2.840.10008.1.2.1";
+    }
     return { ...part, compressed: false };
   }
 
