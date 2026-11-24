@@ -96,6 +96,7 @@ const COMMANDS = {
     options: {
       output: { type: "string", short: "o" },
       set: { type: "string", multiple: true },
+      replace: { type: "string", multiple: true },
       drop: { type: "string", multiple: true },
       module: { type: "string", multiple: true },
       "fhir-patient": { type: "string" },

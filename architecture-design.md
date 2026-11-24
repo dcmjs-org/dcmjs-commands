@@ -65,7 +65,7 @@ servers can import them without shelling out (and browsers get them free):
 
 | today (dcmjs-commands) | proposed home | why |
 |---|---|---|
-| `makeFhirPatientFilter` (insert-or-replace demographics in the stream) | dcmjs `eventStream` filters | it speaks the event-stream vocabulary; nothing Node about it |
+| `makeInsertFilter` (insert-or-replace of top-level elements in the stream: `--set`, `--fhir-patient`) | dcmjs `eventStream` filters | it speaks the event-stream vocabulary; nothing Node about it |
 | `buildFhirLayer` decoration (ids, subject/endpoint/encounter refs, transaction Bundle) | `@dcmjs/fhir` | it decorates the mappers that live there; fs-writing stays in the toolkit |
 | `extractTagKeyedJson` (schema-free DICOM-JSON plucking) | dcmjs utilities | pure, broadly useful |
 

@@ -108,6 +108,79 @@ test("--set fills an element that is present but empty", async () => {
   expect(readDict(outFile).dict["00100020"].Value).toEqual(["NEW"]);
 });
 
+/** The top-level data element tags of a file, in stream order. */
+async function topLevelTags(file) {
+  const { fromPart10Stream, StreamingPart10Writer } = dcmjs.eventStream;
+  const tags = [];
+  let depth = 0;
+  const writer = new StreamingPart10Writer(
+    { onChunk() {} },
+    {
+      startElement(next, tag, info) {
+        if (depth === 0 && !tag.startsWith("0002")) {
+          tags.push(tag);
+        }
+        return next(tag, info);
+      },
+      startSequence(next, tag, info) {
+        if (depth === 0) {
+          tags.push(tag);
+        }
+        depth++;
+        return next(tag, info);
+      },
+      endSequence(next) {
+        depth--;
+        return next();
+      },
+    }
+  );
+  await fromPart10Stream(fs.createReadStream(file), writer);
+  return tags;
+}
+
+test("--set adds a missing tag in ascending tag order", async () => {
+  const src = readDict(FIXTURE);
+  expect(src.dict["00281056"]).toBeUndefined();
+  const outFile = path.join(tmpDir, "set-missing.dcm");
+  const { code } = await filter([FIXTURE], {
+    output: outFile,
+    set: ["VOILUTFunction=SIGMOID"],
+  });
+  expect(code).toBe(0);
+
+  const dst = readDict(outFile);
+  expect(dst.dict["00281056"].vr).toBe("CS");
+  expect(dst.dict["00281056"].Value).toEqual(["SIGMOID"]);
+  const tags = await topLevelTags(outFile);
+  expect(tags).toContain("00281056");
+  expect(tags).toEqual([...tags].sort());
+});
+
+test("--replace replaces a present tag and skips a missing one", async () => {
+  const outFile = path.join(tmpDir, "replace.dcm");
+  const { code } = await filter([FIXTURE], {
+    output: outFile,
+    replace: ["PatientName=REPLACED", "VOILUTFunction=SIGMOID"],
+  });
+  expect(code).toBe(0);
+
+  const src = readDict(FIXTURE);
+  const dst = readDict(outFile);
+  expect(dst.dict["00100010"].Value[0].Alphabetic).toBe("REPLACED");
+  expect(dst.dict["00281056"]).toBeUndefined();
+  expect(Object.keys(dst.dict).sort()).toEqual(Object.keys(src.dict).sort());
+});
+
+test("--set refuses a tag without a usable dictionary VR", async () => {
+  const { code, err } = await filter([FIXTURE], {
+    output: path.join(tmpDir, "never.dcm"),
+    set: ["20011003=X"],
+  });
+  expect(code).toBe(1);
+  expect(err).toMatch(/private tag .* use --replace/);
+});
+
 test("--drop removes leaf elements and whole sequences", async () => {
   const outFile = path.join(tmpDir, "drop.dcm");
   const { code } = await filter([FIXTURE], {

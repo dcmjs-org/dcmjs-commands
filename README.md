@@ -125,6 +125,13 @@ the same command works unchanged on multi-gigabyte inputs:
 ```bash
 dcmjs filter in.dcm -o out.dcm --set 00100010=DOE^JANE --drop 00104000
 
+# --set is insert-or-replace for top-level elements: a missing tag is added
+# in tag order, with the VR from the data dictionary. (Changed: --set was
+# replace-only before.) --replace changes only the elements that are
+# present, at any depth, and skips a missing tag.
+dcmjs filter in.dcm -o out.dcm --set VOILUTFunction=SIGMOID
+dcmjs filter in.dcm -o out.dcm --replace InstitutionName=REDACTED
+
 # Apply a FHIR Patient resource to the patient identity tags.
 # Insert-or-replace: de-identified files whose patient tags were removed
 # still receive the full set; fields absent from the resource are written

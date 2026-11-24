@@ -535,21 +535,43 @@ dcmjs filter in.dcm -o copy.dcm
 # wrote copy.dcm (527,456 bytes, 0 filters)
 ```
 
-### Replace values in place: `--set TAG=VALUE`
+### Add or replace values: `--set TAG=VALUE`
 
-Repeatable; the tag is 8 hex digits or a DICOM keyword. Multi-valued
-elements collapse to the one replacement.
+Repeatable; the tag is 8 hex digits or a DICOM keyword. `--set` is
+**insert-or-replace** for top-level elements: a present element gets the
+new value (multi-valued elements collapse to the one value), and a missing
+element is added at its ascending-tag position, with the VR from the data
+dictionary. `--set` refuses a private tag, a sequence, and a tag that is
+not in the dictionary — use `--replace` or `--module` for those.
 
 ```bash
 # Rename the patient and re-identify the instance in one streaming pass
 dcmjs filter in.dcm -o out.dcm \
   --set PatientName=RESEARCH^SUBJECT^42 \
   --set 00080018=2.25.107441562676745974564652992770535752833
+
+# Add a VOI LUT Function to a file that has none
+dcmjs filter in.dcm -o out.dcm --set VOILUTFunction=SIGMOID
 ```
 
 The same shape at scale: swapping the SOP Instance UID inside a 21.8 GB video
 instance took one pass at ~2 GB peak memory, and the video payload's SHA-256
 was unchanged.
+
+> **Changed behaviour.** Before this change, `--set` was replace-only: it
+> skipped a missing tag with no warning, and it also replaced matching
+> elements inside sequences and private elements. That behaviour is now
+> `--replace`.
+
+### Replace present values only: `--replace TAG=VALUE`
+
+Repeatable, same tag forms as `--set`. `--replace` changes the value of every
+element with this tag, at any depth and also for a private tag, and skips a
+tag that is missing. It never adds an element.
+
+```bash
+dcmjs filter in.dcm -o out.dcm --replace InstitutionName=REDACTED
+```
 
 ### Remove elements or whole sequences: `--drop TAG`
 
@@ -608,8 +630,8 @@ Two things worth knowing when writing modules:
 - **`this` is the shared listener**, not your filter object — several filters
   chain onto one listener, so keep private state in module scope (as above)
   to avoid collisions.
-- **Order**: `--module` filters run before the built-in `--set`/`--drop`
-  filters, and multiple modules run in the order given.
+- **Order**: `--module` filters run first, in the order given, then
+  `--replace`, `--drop`, and last `--set`/`--fhir-patient`.
 
 ### Demographics from FHIR: `--fhir-patient resource.json`
 
@@ -639,7 +661,7 @@ dcmjs dump out.dcm | grep "(0010"
 # (0010,0040) CS PatientSex: F
 ```
 
-Unlike `--set` (replace-only), this is **insert-or-replace**: a
+Like `--set`, this is **insert-or-replace**: a
 de-identified file whose patient tags were removed outright still receives
 the full module, emitted at the correct tag-ordered position. And it's a
 deterministic overwrite — fields the resource doesn't carry are written

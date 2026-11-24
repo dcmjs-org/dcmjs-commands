@@ -268,8 +268,15 @@ export const TOOLS = {
     title: "Rewrite tags in a streaming pass",
     description:
       "Stream a DICOM file through the event-stream filter chain into a " +
-      "new file: set replaces tag values (e.g. patient name/MRN rewrites), " +
-      "drop removes elements or whole sequences at any depth. Memory is " +
+      "new file. set is insert-or-replace for top-level elements: a " +
+      "present element gets the value, a missing one is added in " +
+      "ascending tag order with the VR from the data dictionary (private " +
+      "tags, sequences and tags not in the dictionary are refused). " +
+      "Changed behaviour: set was replace-only before and skipped a " +
+      "missing tag; that behaviour is now replace, which changes a value " +
+      "only where the tag is present (at any depth, private tags too) and " +
+      "skips a missing tag. drop removes elements or whole sequences at " +
+      "any depth. Memory is " +
       "bounded by the largest fragment, so this works on inputs of any " +
       "size. Pixel data passes through untouched. A distinct output path " +
       "is required — in-place rewrites are refused. Changing identity tags " +
@@ -282,7 +289,13 @@ export const TOOLS = {
       set: z
         .array(z.object({ tag: TAG, value: z.string() }))
         .optional()
-        .describe("tag values to replace"),
+        .describe("top-level tag values to add, or replace if present"),
+      replace: z
+        .array(z.object({ tag: TAG, value: z.string() }))
+        .optional()
+        .describe(
+          "tag values to replace where present; a missing tag is skipped"
+        ),
       drop: z.array(TAG).optional().describe("tags to remove"),
       fhir_patient: z
         .string()
@@ -301,6 +314,7 @@ export const TOOLS = {
         values: {
           output: args.output,
           set: (args.set || []).map((s) => `${s.tag}=${s.value}`),
+          replace: (args.replace || []).map((s) => `${s.tag}=${s.value}`),
           drop: args.drop || [],
           module: [],
           "fhir-patient": args.fhir_patient,
