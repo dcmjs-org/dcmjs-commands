@@ -5,6 +5,7 @@ import { dumpDict } from "./utils/dumpFormat.js";
 export * as utils from "./utils/index.js";
 export * as dicomweb from "./dicomweb.js";
 export * from "./access/DicomAccess.js";
+export { storeFiles } from "./commands/dimse.js";
 
 const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
 

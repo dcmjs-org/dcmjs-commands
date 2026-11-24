@@ -23,6 +23,7 @@ import { runAnonymize } from "../commands/anonymize.js";
 import { runFilter } from "../commands/filter.js";
 import { runDicomdir } from "../commands/dicomdir.js";
 import { runDicomweb } from "../commands/dicomweb.js";
+import { storeFiles } from "../commands/dimse.js";
 import { runCaptured, commandError } from "./capture.js";
 
 // Same forms as the CLI filter; runFilter's normalizeTag validates them.
@@ -458,6 +459,55 @@ export const TOOLS = {
         .map((line) => line.match(/→ (.*?)( \(|$)/)?.[1])
         .filter(Boolean);
       return ok({ written }, result);
+    },
+  },
+
+  dimse_store: {
+    title: "Send DICOM files to a PACS with C-STORE",
+    description:
+      "Send local Part 10 files, or every DICOM file under directories, to " +
+      "a DIMSE SCP (a PACS) with C-STORE on one association. Defaults: " +
+      "calling AE title aet 'DCMJS', called AE title aec 'ANY-SCP', " +
+      "timeout_ms 30000. Each file body is sent unchanged when the SCP " +
+      "accepts the file's transfer syntax; otherwise it is transcoded, and " +
+      "a decompression removes the private elements (reported in the " +
+      "instance's warnings). Returns one record per file {file, " +
+      "sopInstanceUid, transferSyntaxUid, result: stored|failed|planned, " +
+      "status, message, warnings}, the stored and total counts, and error " +
+      "for a network error or an association rejection; ok is false when " +
+      "any file failed. Set dry_run true first: it connects to nothing and " +
+      "returns the records and the presentation contexts that would be " +
+      "proposed. Returns no bytes.",
+    inputSchema: {
+      host: z.string().describe("SCP host name or address"),
+      port: z.number().int().min(1).max(65535).describe("SCP port"),
+      paths: z
+        .array(z.string())
+        .min(1)
+        .describe("Part 10 files or directories to send"),
+      aet: z.string().optional().describe("calling AE title (default DCMJS)"),
+      aec: z.string().optional().describe("called AE title (default ANY-SCP)"),
+      timeout_ms: z.number().int().positive().optional(),
+      dry_run: z.boolean().optional(),
+    },
+    async handler({ args }) {
+      const result = await storeFiles({
+        host: args.host,
+        port: args.port,
+        inputs: args.paths,
+        aet: args.aet,
+        aec: args.aec,
+        timeout: args.timeout_ms,
+        dryRun: !!args.dry_run,
+      });
+      return {
+        ok:
+          !result.error && result.instances.every((i) => i.result !== "failed"),
+        warnings: result.instances.flatMap(({ file, warnings }) =>
+          warnings.map((w) => `${file}: ${w}`)
+        ),
+        ...result,
+      };
     },
   },
 };

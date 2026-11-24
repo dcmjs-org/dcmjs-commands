@@ -317,8 +317,9 @@ for the full flag set.
 MCP is the standard protocol by which AI assistants call external tools.
 `dcmjs-mcp` serves every verb above as a typed tool (`dicom_dump`,
 `dicom_instance`, `dicom_validate`, `dicom_convert`, `dicom_anonymize`,
-`dicom_filter`, `dicomdir_create`, `dicomweb_create`), so an agent can
-inspect, convert, and publish DICOM without shell access:
+`dicom_filter`, `dicomdir_create`, `dicomweb_create`, `dimse_store`), so an
+agent can inspect, convert, publish, and send DICOM without shell access
+(the C-STORE send is also `storeFiles` in the JavaScript API):
 
 ```bash
 claude mcp add dcmjs -- dcmjs-mcp     # Claude Code; any MCP client works
@@ -443,6 +444,8 @@ dimsejs find pacs.local 104 --aec PACS -L study -k PatientID=12345 -k StudyDate=
 # C-STORE: files or directories; each file body is sent unchanged when the
 # SCP accepts the file's transfer syntax, and transcoded otherwise
 dimsejs store pacs.local 104 --aec PACS ./study
+# --dry-run: print the instances and the proposed presentation contexts; send nothing
+dimsejs store pacs.local 104 --aec PACS ./study --dry-run
 # C-GET: one <SOPInstanceUID>.dcm file per retrieved instance
 dimsejs get pacs.local 104 --aec PACS -S <StudyInstanceUID> -d ./retrieved
 ```

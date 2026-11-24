@@ -48,10 +48,20 @@ implementation requirement when a better approach is available, if the user requ
 - **DM-I8.** `readPart10Header` reads the first 64 KiB of a file for the meta group and the
   SOP UIDs. It reads the whole file only when (0008,0018) is not in that part. (DM-U4)
 
+- **DM-I9.** `storeFiles` in `src/commands/dimse.js` is the one implementation of the send.
+  `runStore` (the CLI) and the `dimse_store` MCP tool only format its result. (DM-U6, DM-U11)
+- **DM-I10.** The dry run calls `Association.addPresentationContextFromRequest` of
+  `dcmjs-dimse` with Implicit and Explicit VR Little Endian, the same call and syntaxes as
+  `Client.send`. Thus the listed contexts are the contexts that a send proposes. (DM-U10)
+
 ## Known limits
 
-- `store` holds one whole file in memory while it sends the file. A stream from the file
-  needs a change in `dcmjs-dimse`.
+- `store` holds one whole file in memory while it sends the file. In `dcmjs-dimse` 0.3.4,
+  `Network._sendPDataTF` calls `getDenaturalizedDataset()` once, cuts the whole buffer into
+  PDVs, and writes all the PDUs to the socket in one synchronous loop, without a wait for
+  `drain`. Thus a stream source in dcmjs-commands cannot limit the memory. The fix is a change
+  to the write side of `dcmjs-dimse`: read the dataset in PDU-sized parts, and wait for
+  `drain` between the PDUs.
 - `get` writes each instance from the decoded dataset, because `dcmjs-dimse` 0.3.4 decodes
   every received instance on the client side. A store stream for the client needs a change
   in `dcmjs-dimse`.
@@ -61,4 +71,4 @@ implementation requirement when a better approach is available, if the user requ
 - `dcmjs-dimse` proposes Implicit and Explicit VR Little Endian in one presentation context
   for an Implicit VR file. An SCP that prefers Explicit VR thus gets a converted file, not
   the file bytes.
-- The commands have no MCP tools yet.
+- Only `store` has an MCP tool (`dimse_store`). `echo`, `find` and `get` have none yet.
