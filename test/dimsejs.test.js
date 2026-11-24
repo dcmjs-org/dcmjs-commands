@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import dimse from "dcmjs-dimse";
 import { runEcho, runFind, runStore, runGet } from "../src/commands/dimse.js";
 import { readPart10Header } from "../src/dimse/Part10FileDataset.js";
+import { TOOLS } from "../src/mcp/registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(__dirname, "fixtures", "sample-dicom.dcm");
@@ -220,6 +221,46 @@ test("store counts a warning status as stored and exits 0", async () => {
   expect(code).toBe(0);
   expect(out.stderr.join()).toMatch(/stored with warning 0xb000/);
   expect(out.stdout.join()).toMatch(/1 of 1 instances stored/);
+});
+
+test("store --dry-run lists the instances and contexts and sends nothing", async () => {
+  const out = capture();
+  const code = await runStore({
+    host: "127.0.0.1",
+    port: await freePort(), // nothing listens: a connect would fail
+    inputs: [FIXTURE],
+    values: { ...values, dryRun: true },
+    ...out.io,
+  });
+  expect(code).toBe(0);
+  const { sopClassUid, sopInstanceUid } = readPart10Header(FIXTURE);
+  const plan = JSON.parse(out.stdout.join(""));
+  expect(plan.instances).toEqual([
+    expect.objectContaining({
+      file: FIXTURE,
+      sopInstanceUid,
+      result: "planned",
+    }),
+  ]);
+  expect(plan.presentationContexts[0]).toMatchObject({
+    abstractSyntaxUid: sopClassUid,
+    transferSyntaxUids: expect.arrayContaining([
+      TransferSyntax.ImplicitVRLittleEndian,
+    ]),
+  });
+  expect(received.bytes).toHaveLength(0);
+});
+
+test("the dimse_store MCP tool returns the status of each file", async () => {
+  const result = await TOOLS.dimse_store.handler({
+    args: { host: "127.0.0.1", port, paths: [FIXTURE], aec: "TEST" },
+  });
+  expect(result).toMatchObject({ ok: true, stored: 1, total: 1 });
+  expect(result.instances[0]).toMatchObject({
+    file: FIXTURE,
+    result: "stored",
+    status: expect.stringMatching(/^0x0000/),
+  });
 });
 
 test("find keeps the matches of a 0xFF01 pending status, with a warning", async () => {

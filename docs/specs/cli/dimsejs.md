@@ -44,4 +44,11 @@ reason to change a user requirement. The implementation requirements are in
   error or an association rejection, and with 2 on a usage error. A message on stderr names
   the command and the cause.
 - **DM-U9.** The user can set the calling AE title (`--aet`), the called AE title (`--aec`)
-  and the timeout (`--timeout`) for every command.
+  and the timeout (`--timeout`) for every command. The help of each command states the
+  default value of each option.
+- **DM-U10.** `dimsejs store --dry-run` lists each instance and the presentation contexts
+  that the command will propose, and sends nothing. The command does not connect to the SCP.
+- **DM-U11.** An AI agent can send files with the `dimse_store` tool of `dcmjs-mcp`, and a
+  program can send files with the `storeFiles` function of `@dcmjs/commands`. Both give the
+  same result for each file as `dimsejs store`, and both offer the dry run of DM-U10. The
+  tool returns no bytes.
