@@ -144,16 +144,58 @@ function boundaryOf(contentType) {
 }
 
 /**
+ * The boundary from the first line of a multipart body, for a server that
+ * sends no usable Content-Type (a static server can send a bare
+ * "multipart/related"). The first line must be "--<boundary>" and the
+ * next line a part header. Returns the boundary (or null) and a body
+ * stream that still holds the peeked bytes.
+ */
+async function sniffBoundary(stream) {
+  const reader = stream.getReader();
+  let head = new Uint8Array(0);
+  while (head.length < 1024) {
+    const r = await reader.read();
+    if (r.done) break;
+    const next = new Uint8Array(head.length + r.value.length);
+    next.set(head);
+    next.set(r.value, head.length);
+    head = next;
+  }
+  const match = /^--([^\r\n]{1,70}?)[ \t]*\r\n[!-9;-~]+:/.exec(
+    new TextDecoder("latin1").decode(head)
+  );
+  const body = new ReadableStream({
+    start(controller) {
+      if (head.length) controller.enqueue(head);
+    },
+    async pull(controller) {
+      const r = await reader.read();
+      if (r.done) controller.close();
+      else controller.enqueue(r.value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+  return { boundary: match?.[1] ?? null, body };
+}
+
+/**
  * Splits a fetch Response into parts as it streams. Only one part (plus
- * one boundary length) is in memory at a time.
+ * one boundary length) is in memory at a time. The boundary comes from
+ * the Content-Type header, else from the first line of the body.
  */
 export async function* responseParts(response) {
-  const boundary = boundaryOf(response.headers.get("content-type") || "");
+  let boundary = boundaryOf(response.headers.get("content-type") || "");
+  let stream = response.body;
+  if (!boundary && stream) {
+    ({ boundary, body: stream } = await sniffBoundary(stream));
+  }
   if (!boundary) {
-    yield { headers: response.headers, body: response.body };
+    yield { headers: response.headers, body: stream };
     return;
   }
-  const reader = response.body.getReader();
+  const reader = stream.getReader();
   const delimiter = stringToUint8Array(`\r\n--${boundary}`);
   const crlf2 = stringToUint8Array("\r\n\r\n");
   // A leading CRLF lets the first boundary match the same delimiter.

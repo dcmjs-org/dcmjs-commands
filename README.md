@@ -375,7 +375,14 @@ dicomwebjs download ./study -S <StudyInstanceUID> -d ~/dicomweb   # Part 10 dir
 
 ### part10
 
-Converts DICOMweb data into binary Part 10 files.
+Converts DICOMweb data into binary Part 10 files. Each frame is kept in the
+transfer syntax the server sends, with no decode or transcode: the
+`transfer-syntax` parameter of the part `Content-Type`, else
+`AvailableTransferSyntaxUID` when the frame is not the uncompressed size,
+else Explicit VR Little Endian. A compressed frame becomes encapsulated
+Pixel Data. A multipart response with no boundary in its `Content-Type` (a
+static server can send a bare `multipart/related`) is split at the boundary
+on the first line of the body; `download` uses the same parser.
 
 ```bash
 dicomwebjs part10 https://server/dicomweb -S <StudyInstanceUID> -d ./downloads
