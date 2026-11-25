@@ -1,6 +1,6 @@
 // src/pixel/index.js
 //
-// `@dcmjs/commands/pixel`: the per-frame codec API, the header helpers, the
+// `@dcmjs-org/commands/pixel`: the per-frame codec API, the header helpers, the
 // output transfer syntax table and the compression rule, for use as a
 // library.
 

@@ -1,6 +1,6 @@
 // test/pixel.test.js
 //
-// API contract of `@dcmjs/commands/pixel`: the new lossless targets and the
+// API contract of `@dcmjs-org/commands/pixel`: the new lossless targets and the
 // compression rule.
 
 import { execFileSync } from "node:child_process";
@@ -220,13 +220,13 @@ test("API contract: HTJ2K refuses colour over 8 bits, which the codec does not k
   ).toBe(null);
 });
 
-test("API contract: ESM import of @dcmjs/commands/pixel", () => {
+test("API contract: ESM import of @dcmjs-org/commands/pixel", () => {
   const out = execFileSync(
     process.execPath,
     [
       "--input-type=module",
       "-e",
-      "const m = await import('@dcmjs/commands/pixel');" +
+      "const m = await import('@dcmjs-org/commands/pixel');" +
         "console.log(typeof m.selectTargetSyntax, typeof m.encodeFrame)",
     ],
     { cwd: ROOT, encoding: "utf8" }

@@ -45,9 +45,16 @@ APIs, pipeable CLI, SMART-context inputs), see
 
 ## Install
 
-Requires Node >= 22.13. The `dcmjs` dependency is the published dcmjs 1.0
-beta (`npm:@dcmjs-org/dcmjs@1.0.0-beta.4`), together with
-`@dcmjs-org/media` and `@dcmjs-org/fhir`, so a plain npm install is enough:
+Requires Node >= 22.13. Install the commands (`dcmjs`, `dicomwebjs`,
+`dimsejs`, `dcmjs-mcp`) globally from npm:
+
+```bash
+npm install -g @dcmjs-org/commands
+```
+
+The `dcmjs` dependency is the published dcmjs 1.0 beta
+(`npm:@dcmjs-org/dcmjs@1.0.0-beta.17`), together with `@dcmjs-org/media`
+and `@dcmjs-org/fhir`. To work from source:
 
 ```bash
 git clone https://github.com/dcmjs-org/dcmjs-commands.git
@@ -396,7 +403,7 @@ server that needs authentication:
 dicomwebjs download https://server/dicomweb -S <uid> -d ./web --token env:DICOMWEB_TOKEN
 ```
 
-### DICOMweb client (`@dcmjs/commands/dicomweb-fetch`)
+### DICOMweb client (`@dcmjs-org/commands/dicomweb-fetch`)
 
 The http source above is a small client on the global `fetch` (no XHR, no
 jsdom). Frame, bulkdata, and Part 10 retrieves give an async iterable of
@@ -404,7 +411,7 @@ jsdom). Frame, bulkdata, and Part 10 retrieves give an async iterable of
 `retryAfter`, and `url`.
 
 ```js
-import { DicomWebFetch } from "@dcmjs/commands/dicomweb-fetch";
+import { DicomWebFetch } from "@dcmjs-org/commands/dicomweb-fetch";
 const client = new DicomWebFetch({ url, headers: async () => ({ Authorization: `Bearer ${await token()}` }) });
 const studies = await client.search("studies", { PatientID: "123" });
 for await (const { headers, body } of await client.retrieveFrames(study, series, sop, [1, 2])) {
@@ -447,7 +454,7 @@ dimsejs store pacs.local 104 --aec PACS ./study
 dimsejs get pacs.local 104 --aec PACS -S <StudyInstanceUID> -d ./retrieved
 ```
 
-## Library: `@dcmjs/commands/pixel`
+## Library: `@dcmjs-org/commands/pixel`
 
 The per-frame codec API for other programs: `decodeFrame`, `encodeFrame`,
 `transcodeFrame`, `isBitstreamTranscode`, `imageInfoFromDict`, `hasDecoder`,
@@ -456,7 +463,7 @@ syntax table (`OUTPUT_SYNTAXES`, `resolveOutputSyntax`, the UID constants),
 and the compression rule `selectTargetSyntax`.
 
 ```js
-import { selectTargetSyntax, transcodeFrame, imageInfoFromDict } from "@dcmjs/commands/pixel";
+import { selectTargetSyntax, transcodeFrame, imageInfoFromDict } from "@dcmjs-org/commands/pixel";
 
 // incomingTransferSyntax is optional; `incoming` is the syntax the rule used.
 const { target, reason, incoming } = selectTargetSyntax(metadata, { incomingTransferSyntax });

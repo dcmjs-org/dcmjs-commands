@@ -10,5 +10,5 @@
       (`DM-U*`). The implementation requirements (`DM-I*`) are in a separate document,
       [dimsejs-implementation.md](specs/cli/dimsejs-implementation.md).
   - [specs/library/](specs/library/) covers the library exports.
-    - [pixel.md](specs/library/pixel.md): `@dcmjs/commands/pixel` and
+    - [pixel.md](specs/library/pixel.md): `@dcmjs-org/commands/pixel` and
       `selectTargetSyntax` (`PL-*`).

@@ -71,7 +71,7 @@ servers can import them without shelling out (and browsers get them free):
 
 Then give dcmjs-commands a real `exports` map so the Node-only pieces
 (DicomAccess, Part 10 directory source, publish pipelines) are a
-programmatic API — `import { publishStudy } from "@dcmjs/commands"` — with
+programmatic API — `import { publishStudy } from "@dcmjs-org/commands"` — with
 the CLI and MCP server as thin front ends over it. Three surfaces, one core.
 
 **This promotion is also the answer to both open questions below**: they are
