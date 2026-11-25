@@ -4,6 +4,7 @@
 // DICOMweb tools: dump/instance against http or Static DICOMweb file
 // sources, plus download/part10 study transfers (src/commands/webTransfer).
 
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { dicomweb, instanceDicom, dumpDicom } from "../src/index.js";
 import { registerTransferCommands } from "../src/commands/webTransfer.js";
@@ -13,12 +14,13 @@ import { exitOnEpipe } from "../src/utils/exitOnEpipe.js";
 // `dicomwebjs dump url | head` must end quietly when head closes the pipe
 exitOnEpipe();
 
+const { version } = createRequire(import.meta.url)("../package.json");
 const program = new Command();
 
 program
   .name("dicomwebjs")
   .description("dicomwebjs based tools for manipulation of DICOMweb")
-  .version("0.1.0");
+  .version(version);
 
 program
   .command("dump")
