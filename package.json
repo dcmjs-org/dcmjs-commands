@@ -1,6 +1,6 @@
 {
   "name": "@dcmjs-org/commands",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Command line tools for dcmjs and DICOMweb",
   "type": "module",
   "publishConfig": {
