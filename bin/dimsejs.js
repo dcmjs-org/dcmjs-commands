@@ -3,12 +3,14 @@
 //
 // DIMSE SCU tools: echo, find, store, get (src/commands/dimse.js).
 
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { registerDimseCommands } from "../src/commands/dimse.js";
 import { exitOnEpipe } from "../src/utils/exitOnEpipe.js";
 
 exitOnEpipe();
 
+const { version } = createRequire(import.meta.url)("../package.json");
 const program = new Command();
 
 program
@@ -16,7 +18,7 @@ program
   .description(
     "DIMSE networking tools: C-ECHO, C-FIND, C-STORE and C-GET as an SCU"
   )
-  .version("0.1.0");
+  .version(version);
 
 registerDimseCommands(program, {
   stdout: (text) => console.log(text),
