@@ -1,8 +1,8 @@
-# Specification: `@dcmjs/commands/pixel`
+# Specification: `@dcmjs-org/commands/pixel`
 
 ## Scope
 
-This specification covers the library export `@dcmjs/commands/pixel`: the per-frame codec
+This specification covers the library export `@dcmjs-org/commands/pixel`: the per-frame codec
 API, the output transfer syntax table, and the compression rule `selectTargetSyntax`. A
 program, for example a Static-DICOMweb proxy, uses the rule to choose the storage transfer
 syntax of each frame. The commands `dcmjs transcode` and `dcmjs wsiresize` use the same
@@ -22,7 +22,7 @@ rules:
 
 ## § User requirements
 
-- **PL-U1.** A program imports the per-frame API from `@dcmjs/commands/pixel` as an ES
+- **PL-U1.** A program imports the per-frame API from `@dcmjs-org/commands/pixel` as an ES
   module: `decodeFrame`, `encodeFrame`, `transcodeFrame`, `isBitstreamTranscode`,
   `imageInfoFromDict`, `hasDecoder`, `photometricAfter`, `updatePixelHeader`,
   `OUTPUT_SYNTAXES`, `OUTPUT_ALIASES`, `resolveOutputSyntax`, the UID constants,

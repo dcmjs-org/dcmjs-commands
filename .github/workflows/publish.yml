@@ -1,0 +1,46 @@
+name: Publish to npm
+
+# npm trusted publishing (OIDC): no NPM_TOKEN. The trust on npmjs.com names
+# this file and the `publish` environment.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: publish
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      # Bundle the overridden dcmjs tree: `overrides` does not apply to `npm install -g`.
+      # Set here and not in package.json, because npm install loops with both (DM-I1).
+      - name: Bundle dcmjs and dcmjs-dimse
+        run: npm pkg set 'bundleDependencies[]=dcmjs' 'bundleDependencies[]=dcmjs-dimse'
+
+      # A prerelease version (for example 0.2.0-beta.1) goes to the `next` tag, so `latest` stays stable.
+      - name: Publish
+        run: |
+          if node -p "require('./package.json').version" | grep -q -- '-'; then
+            npm publish --tag next
+          else
+            npm publish
+          fi

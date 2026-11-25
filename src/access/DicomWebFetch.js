@@ -1,7 +1,7 @@
 // src/access/DicomWebFetch.js
 //
 // A DICOMweb client on the global fetch: no XHR, no jsdom, no
-// dicomweb-client. Exported as @dcmjs/commands/dicomweb-fetch.
+// dicomweb-client. Exported as @dcmjs-org/commands/dicomweb-fetch.
 
 import { findToken, stringToUint8Array } from "../utils/message.js";
 
