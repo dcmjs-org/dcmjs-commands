@@ -1,6 +1,6 @@
 {
   "name": "@dcmjs-org/commands",
-  "version": "0.1.1",
+  "version": "1.1.0",
   "description": "Command line tools for dcmjs and DICOMweb",
   "type": "module",
   "publishConfig": {
@@ -58,11 +58,11 @@
   },
   "dependencies": {
     "@cornerstonejs/dicom-codec": "^1.2.0",
-    "@dcmjs-org/fhir": "1.0.0-beta.17",
-    "@dcmjs-org/media": "1.0.0-beta.17",
+    "@dcmjs-org/fhir": "1.1.0",
+    "@dcmjs-org/media": "1.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.1.0",
-    "dcmjs": "npm:@dcmjs-org/dcmjs@1.0.0-beta.17",
+    "dcmjs": "npm:@dcmjs-org/dcmjs@1.1.0",
     "dcmjs-dimse": "0.3.4",
     "jpeg-js": "^0.4.4",
     "loglevel": "^1.9.2",
