@@ -52,8 +52,8 @@ Requires Node >= 22.13. Install the commands (`dcmjs`, `dicomwebjs`,
 npm install -g @dcmjs-org/commands
 ```
 
-The `dcmjs` dependency is the published dcmjs 1.0 beta
-(`npm:@dcmjs-org/dcmjs@1.0.0-beta.17`), together with `@dcmjs-org/media`
+The `dcmjs` dependency is the published dcmjs 1.x release
+(`npm:@dcmjs-org/dcmjs@1.1.0`), together with `@dcmjs-org/media`
 and `@dcmjs-org/fhir`. To work from source:
 
 ```bash

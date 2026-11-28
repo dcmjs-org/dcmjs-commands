@@ -10,14 +10,15 @@ implementation requirement when a better approach is available, if the user requ
 
 - **DM-I1.** The commands use `dcmjs-dimse` for the DIMSE protocol. The `overrides` entry
   `"dcmjs": "$dcmjs"` in `package.json` makes `dcmjs-dimse` and `dcmjs-codecs` use the same
-  `@dcmjs-org/dcmjs` 1.0 beta as dcmjs-commands. npm applies `overrides` only in the root
+  `@dcmjs-org/dcmjs` 1.x as dcmjs-commands. npm applies `overrides` only in the root
   project. The publish workflow therefore adds `bundleDependencies` for `dcmjs` and
   `dcmjs-dimse` after `npm ci`, and the bundle also holds `dcmjs-codecs`, so that
   `npm install -g @dcmjs-org/commands` and a dependent project also get one dcmjs. An
-  `npm-shrinkwrap.json` does not do this: npm sees that the 1.0 beta does not satisfy the
+  `npm-shrinkwrap.json` does not do this: npm sees that dcmjs 1.x does not satisfy the
   `^0.50.1` range of `dcmjs-dimse`, and installs dcmjs 0.50.3 for it. `package.json` does not
   hold `bundleDependencies`, because `npm install` then loops without end on the override.
-  (DM-U1 to DM-U9)
+  Remove the override and the bundle step when a `dcmjs-dimse` release depends on dcmjs 1.x
+  (PantelisGeorgiadis/dcmjs-dimse#90). (DM-U1 to DM-U9)
 - **DM-I2.** `store` gives `dcmjs-dimse` a `Part10FileDataset` for each file
   (`src/dimse/Part10FileDataset.js`). `getDenaturalizedDataset()` returns the bytes of the
   file after the File Meta Information, without a decode. `dcmjs-dimse` sends these bytes
